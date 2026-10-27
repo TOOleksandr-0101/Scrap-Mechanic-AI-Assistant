@@ -52,7 +52,6 @@ function AICowCharacter.cl_openAiGui( self )
 
 	self.cl.aiGui = sm.jsonGui.createGui( { isInteractive = true, needsCursor = true, hidesHotbar = true } )
 	self.cl.aiGui:render( GuiData )
-	self.cl.aiGui:open()
 end
 
 function AICowCharacter.cl_sendAiPrompt( self, prompt )

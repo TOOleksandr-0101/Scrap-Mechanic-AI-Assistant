@@ -96,20 +96,20 @@ local QuestDisplayNames = {
     ["quest_bosstrain"] = "Second Station"
 }
 local TimeOfDayAliases = {
-    ["night"] = 0.85,
+    ["night"] = 0.95,
     ["midnight"] = 0.0,
     ["morning"] = 0.25,
     ["noon"] = 0.5,
     ["day"] = 0.5,
-    ["evening"] = 0.72,
+    ["evening"] = 0.75,
     ["sunrise"] = 0.23,
     ["sunset"] = 0.77,
-    ["ночь"] = 0.85,
+    ["ночь"] = 0.95,
     ["полночь"] = 0.0,
     ["утро"] = 0.25,
     ["день"] = 0.5,
     ["полдень"] = 0.5,
-    ["вечер"] = 0.72,
+    ["вечер"] = 0.75,
     ["рассвет"] = 0.23,
     ["закат"] = 0.77
 }
@@ -266,6 +266,101 @@ local function ai_buildQuestContext()
         completedQuests = completedList,
         suggestedQuestOrder = suggestedList
     }
+end
+
+local function ai_buildWorldContext( self )
+    local timeData = self.cl and self.cl.time
+    local rawTimeOfDay = timeData and timeData.timeOfDay or ( sm.game.getTimeOfDay and sm.game.getTimeOfDay() or 0.0 )
+    local currentDay = math.floor( rawTimeOfDay )
+    local todFraction = math.fmod( rawTimeOfDay, 1.0 )
+    if todFraction < 0 then
+        todFraction = todFraction + 1.0
+    end
+
+    local hour = ( todFraction * 24 ) % 24
+    local minute = ( hour % 1 ) * 60
+    local timeString = string.format( "%02d:%02d", math.floor( hour ), math.floor( minute ) )
+
+    local phase = "day"
+    if todFraction < ( 3 / 24 ) or todFraction >= ( 21 / 24 ) then
+        phase = "night"
+    elseif todFraction >= ( 3 / 24 ) and todFraction < ( 6 / 24 ) then
+        phase = "dawn"
+    elseif todFraction >= ( 6 / 24 ) and todFraction < ( 18 / 24 ) then
+        phase = "day"
+    elseif todFraction >= ( 18 / 24 ) and todFraction < ( 21 / 24 ) then
+        phase = "dusk"
+    end
+
+    return {
+        day = currentDay,
+        timeOfDay = ai_round( todFraction ),
+        timeString = timeString,
+        phase = phase,
+        timeProgress = ( timeData and timeData.timeProgress ~= nil ) and timeData.timeProgress or true,
+        serverTick = sm.game.getServerTick and sm.game.getServerTick() or nil
+    }
+end
+
+local function ai_buildPlayerContext()
+    local player = sm.localPlayer and sm.localPlayer.getPlayer and sm.localPlayer.getPlayer() or nil
+    if not player then
+        return nil
+    end
+
+    local context = {
+        name = player.name or "Player"
+    }
+
+    local character = player.character
+    if character and sm.exists( character ) then
+        local pos = character.worldPosition
+        context.position = {
+            x = ai_round( pos.x ),
+            y = ai_round( pos.y ),
+            z = ai_round( pos.z )
+        }
+        local dir = character.direction
+        context.direction = {
+            x = ai_round( dir.x ),
+            y = ai_round( dir.y ),
+            z = ai_round( dir.z )
+        }
+        context.isSwimming = character.isSwimming and character:isSwimming() or false
+        context.isDiving = character.isDiving and character:isDiving() or false
+        context.isCrouching = character.isCrouching and character:isCrouching() or false
+        context.isSprinting = character.isSprinting and character:isSprinting() or false
+    end
+
+    return context
+end
+
+local function ai_buildCompanionContext( playerPos )
+    local isActive = BabyWocManager.Cl_IsActive and BabyWocManager.Cl_IsActive() or false
+    local followerData = BabyWocManager.Cl_GetFollowerData and BabyWocManager.Cl_GetFollowerData() or nil
+
+    local companion = {
+        active = isActive,
+        name = NpcName,
+        present = false,
+        distanceToPlayer = nil
+    }
+
+    if followerData and followerData.character and sm.exists( followerData.character ) then
+        local charPos = followerData.character.worldPosition
+        companion.present = true
+        companion.position = {
+            x = ai_round( charPos.x ),
+            y = ai_round( charPos.y ),
+            z = ai_round( charPos.z )
+        }
+        if playerPos then
+            local dist = ( charPos - playerPos ):length()
+            companion.distanceToPlayer = ai_round( dist )
+        end
+    end
+
+    return companion
 end
 
 function Game.server_onCreate( self )
@@ -449,29 +544,32 @@ function Game.cl_onChatCommand( self, params )
         
         ai_pushHistory( self, "user", prompt )
         self.ai.pending = true
-        local position = nil
+
+        local playerContext = ai_buildPlayerContext()
+        local rawPlayerPos = nil
         if sm.localPlayer and sm.localPlayer.getPlayer and sm.localPlayer.getPlayer() then
             local localPlayer = sm.localPlayer.getPlayer()
             if localPlayer and localPlayer.character and sm.exists( localPlayer.character ) then
-                local playerPos = localPlayer.character.worldPosition
-                position = {
-                    x = ai_round( playerPos.x ),
-                    y = ai_round( playerPos.y ),
-                    z = ai_round( playerPos.z )
-                }
+                rawPlayerPos = localPlayer.character.worldPosition
             end
         end
+
+        local companionContext = ai_buildCompanionContext( rawPlayerPos )
+        local worldContext = ai_buildWorldContext( self )
 
         local request = {
             id = self.ai.nextRequestId,
             prompt = prompt,
-            playerName = "Player",
+            playerName = ( playerContext and playerContext.name ) and playerContext.name or "Player",
             sentAt = 0,
             npcEnabled = self.ai.npcEnabled,
             npcName = self.ai.npcName,
             history = self.ai.history,
-            position = position,
+            position = playerContext and playerContext.position or nil,
             liveContext = {
+                world = worldContext,
+                player = playerContext,
+                companion = companionContext,
                 questState = ai_buildQuestContext()
             }
         }
@@ -578,9 +676,13 @@ function Game.sv_executeAiActions( self, params, player )
         elseif name == "set_time_of_day" then
             local timeValue = ai_findTimeOfDayValue( args )
             if timeValue ~= nil then
-                self.sv.time.timeOfDay = timeValue
+                local currentDay = math.floor( self.sv.time.timeOfDay )
+                self.sv.time.timeOfDay = currentDay + sm.util.clamp( timeValue, 0.0, 0.9999 )
+                if self.sv.syncTimer then
+                    self.sv.syncTimer.count = self.sv.syncTimer.ticks
+                end
                 self:sv_updateClientData()
-                statusMessage = "Time of day set to " .. tostring( timeValue ) .. "."
+                statusMessage = "Time of day set to " .. tostring( timeValue ) .. " (Day " .. tostring( currentDay ) .. ")."
             else
                 statusMessage = "Time preset/value not recognized."
             end
