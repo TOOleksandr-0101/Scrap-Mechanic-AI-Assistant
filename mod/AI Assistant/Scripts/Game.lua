@@ -390,7 +390,8 @@ function Game.client_onCreate( self )
         npcEnabled = true,
         npcName = NpcName,
         history = {},
-        lastExecutedActionResponseId = 0
+        lastExecutedActionResponseId = 0,
+        lastActionResults = nil
     }
 
     local existingRequest = ai_loadJson( RequestPath )
@@ -570,10 +571,12 @@ function Game.cl_onChatCommand( self, params )
                 world = worldContext,
                 player = playerContext,
                 companion = companionContext,
-                questState = ai_buildQuestContext()
+                questState = ai_buildQuestContext(),
+                lastActionResults = self.ai.lastActionResults
             }
         }
 
+        self.ai.lastActionResults = nil
         self.ai.lastSentRequestId = request.id
         self.ai.nextRequestId = self.ai.nextRequestId + 1
         ai_saveJson( RequestPath, request )
@@ -624,115 +627,206 @@ local function ai_followerIsActiveForPlayer( player )
     return false
 end
 
+local MaxActionsPerRequest = 3
+
 function Game.sv_executeAiActions( self, params, player )
     if not params or not params.actions or not player then
         return
     end
 
-    for _, action in ipairs( params.actions ) do
-        local name = action.name
-        local args = action.args or {}
-        local statusMessage = nil
+    local results = {}
 
-        if name == "call_companion" then
-            if not ai_followerIsActiveForPlayer( player ) then
-                BabyWocManager.Sv_CallFollower( player )
-                statusMessage = "Baby woc companion called."
-            else
-                statusMessage = "Baby woc companion already active."
-            end
-        elseif name == "dismiss_companion" then
-            if ai_followerIsActiveForPlayer( player ) then
-                BabyWocManager.Sv_CallFollower( player )
-                statusMessage = "Baby woc companion dismissed."
-            else
-                statusMessage = "Baby woc companion was not active."
-            end
-        elseif name == "spawn_ai_cow" then
-            if player.character and sm.exists( player.character ) then
-                sm.event.sendToWorld( player.character:getWorld(), "sv_e_spawnAiNpc", { player = player, npcName = NpcName } )
-                statusMessage = "AI cow spawn requested."
-            end
-        elseif name == "despawn_ai_cow" then
-            if player.character and sm.exists( player.character ) then
-                sm.event.sendToWorld( player.character:getWorld(), "sv_e_despawnAiNpc", { player = player } )
-                statusMessage = "AI cow despawn requested."
-            end
-        elseif name == "set_ai_mode_follow" then
-            if player.character and sm.exists( player.character ) then
-                sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "follow" } )
-                statusMessage = "AI cow set to follow mode."
-            end
-        elseif name == "set_ai_mode_stay" then
-            if player.character and sm.exists( player.character ) then
-                sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "stay" } )
-                statusMessage = "AI cow set to stay mode."
-            end
-        elseif name == "set_ai_mode_come" then
-            if player.character and sm.exists( player.character ) then
-                sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "come" } )
-                statusMessage = "AI cow told to come."
-            end
-        elseif name == "set_time_of_day" then
-            local timeValue = ai_findTimeOfDayValue( args )
-            if timeValue ~= nil then
-                local currentDay = math.floor( self.sv.time.timeOfDay )
-                self.sv.time.timeOfDay = currentDay + sm.util.clamp( timeValue, 0.0, 0.9999 )
-                if self.sv.syncTimer then
-                    self.sv.syncTimer.count = self.sv.syncTimer.ticks
+    for index, action in ipairs( params.actions ) do
+        local name = tostring( action.name or "" )
+        local args = ( type( action.args ) == "table" ) and action.args or {}
+
+        if index > MaxActionsPerRequest then
+            results[#results + 1] = {
+                name = name,
+                status = "limit_exceeded",
+                message = "Maximum actions limit (3) exceeded for this turn."
+            }
+        else
+            local status = "unsupported"
+            local message = "Action not supported."
+
+            if name == "call_companion" then
+                if not ai_followerIsActiveForPlayer( player ) then
+                    BabyWocManager.Sv_CallFollower( player )
+                    status = "success"
+                    message = "Baby woc companion summoned."
+                else
+                    status = "success"
+                    message = "Baby woc companion is already active."
                 end
-                self:sv_updateClientData()
-                statusMessage = "Time of day set to " .. tostring( timeValue ) .. " (Day " .. tostring( currentDay ) .. ")."
-            else
-                statusMessage = "Time preset/value not recognized."
-            end
-        elseif name == "set_time_progress" then
-            if args.enabled ~= nil then
-                self.sv.time.timeProgress = args.enabled == true
-                self:sv_updateClientData()
-                statusMessage = "Time progression set to " .. tostring( self.sv.time.timeProgress ) .. "."
-            end
-        elseif name == "activate_quest" then
-            local questSpec = ai_extractQuestSpecifier( args )
-            local questName = ai_findQuestName( questSpec )
-            if questName then
-                QuestManager.Sv_TryActivateQuest( questName )
-                statusMessage = "Quest activation requested: " .. questName
-            else
-                statusMessage = "Quest not found for activation."
-            end
-        elseif name == "complete_quest" then
-            local questSpec = ai_extractQuestSpecifier( args )
-            local questName = ai_findQuestName( questSpec )
-            if questName then
-                QuestManager.Sv_CompleteQuest( questName )
-                statusMessage = "Quest completion requested: " .. questName
-            elseif questSpec == "*" or questSpec == "all_active" or questSpec == "active" or questSpec == "current" or questSpec == "all current" then
-                local activeQuests = QuestManager.Sv_GetActiveQuests and QuestManager.Sv_GetActiveQuests() or nil
-                local completed = 0
-                if activeQuests then
-                    for questNameKey, _ in pairs( activeQuests ) do
-                        QuestManager.Sv_CompleteQuest( questNameKey )
-                        completed = completed + 1
+            elseif name == "dismiss_companion" then
+                if ai_followerIsActiveForPlayer( player ) then
+                    BabyWocManager.Sv_CallFollower( player )
+                    status = "success"
+                    message = "Baby woc companion dismissed."
+                else
+                    status = "failure"
+                    message = "Baby woc companion was not active."
+                end
+            elseif name == "spawn_ai_cow" then
+                if player.character and sm.exists( player.character ) then
+                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_spawnAiNpc", { player = player, npcName = NpcName } )
+                    status = "success"
+                    message = "AI cow spawn requested."
+                else
+                    status = "failure"
+                    message = "Player character does not exist."
+                end
+            elseif name == "despawn_ai_cow" then
+                if player.character and sm.exists( player.character ) then
+                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_despawnAiNpc", { player = player } )
+                    status = "success"
+                    message = "AI cow despawn requested."
+                else
+                    status = "failure"
+                    message = "Player character does not exist."
+                end
+            elseif name == "set_ai_mode_follow" then
+                if player.character and sm.exists( player.character ) then
+                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "follow" } )
+                    status = "success"
+                    message = "AI cow set to follow mode."
+                else
+                    status = "failure"
+                    message = "Player character does not exist."
+                end
+            elseif name == "set_ai_mode_stay" then
+                if player.character and sm.exists( player.character ) then
+                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "stay" } )
+                    status = "success"
+                    message = "AI cow set to stay mode."
+                else
+                    status = "failure"
+                    message = "Player character does not exist."
+                end
+            elseif name == "set_ai_mode_come" then
+                if player.character and sm.exists( player.character ) then
+                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "come" } )
+                    status = "success"
+                    message = "AI cow told to come."
+                else
+                    status = "failure"
+                    message = "Player character does not exist."
+                end
+            elseif name == "set_time_of_day" then
+                local timeValue = ai_findTimeOfDayValue( args )
+                if timeValue ~= nil then
+                    local currentDay = math.floor( self.sv.time.timeOfDay )
+                    self.sv.time.timeOfDay = currentDay + sm.util.clamp( timeValue, 0.0, 0.9999 )
+                    if self.sv.syncTimer then
+                        self.sv.syncTimer.count = self.sv.syncTimer.ticks
+                    end
+                    self:sv_updateClientData()
+                    status = "success"
+                    message = "Time set to " .. tostring( timeValue ) .. " on Day " .. tostring( currentDay ) .. "."
+                else
+                    status = "invalid_args"
+                    message = "Time preset or value not recognized (must be a number between 0.0 and 1.0 or preset name)."
+                end
+            elseif name == "set_time_progress" then
+                if args.enabled ~= nil then
+                    self.sv.time.timeProgress = ( args.enabled == true )
+                    if self.sv.syncTimer then
+                        self.sv.syncTimer.count = self.sv.syncTimer.ticks
+                    end
+                    self:sv_updateClientData()
+                    status = "success"
+                    message = "Time progression set to " .. tostring( self.sv.time.timeProgress ) .. "."
+                else
+                    status = "invalid_args"
+                    message = "Argument 'enabled' (boolean) is required."
+                end
+            elseif name == "activate_quest" then
+                local questSpec = ai_extractQuestSpecifier( args )
+                if not questSpec then
+                    status = "invalid_args"
+                    message = "No quest id specified in args.quest."
+                else
+                    local questName = ai_findQuestName( questSpec )
+                    if questName then
+                        QuestManager.Sv_TryActivateQuest( questName )
+                        status = "success"
+                        message = "Quest '" .. questName .. "' activated."
+                    else
+                        status = "not_found"
+                        message = "Quest '" .. tostring( questSpec ) .. "' not found in known quests."
                     end
                 end
-                statusMessage = "Active quest completion requested for " .. tostring( completed ) .. " quests."
+            elseif name == "complete_quest" then
+                local questSpec = ai_extractQuestSpecifier( args )
+                if not questSpec then
+                    status = "invalid_args"
+                    message = "No quest id specified in args.quest."
+                elseif questSpec == "*" or questSpec == "all_active" or questSpec == "active" or questSpec == "current" or questSpec == "all current" then
+                    local activeQuests = QuestManager.Sv_GetActiveQuests and QuestManager.Sv_GetActiveQuests() or nil
+                    local count = 0
+                    if activeQuests then
+                        for questNameKey, _ in pairs( activeQuests ) do
+                            QuestManager.Sv_CompleteQuest( questNameKey )
+                            count = count + 1
+                        end
+                    end
+                    status = "success"
+                    message = "Completed " .. tostring( count ) .. " active quests."
+                else
+                    local questName = ai_findQuestName( questSpec )
+                    if questName then
+                        QuestManager.Sv_CompleteQuest( questName )
+                        status = "success"
+                        message = "Quest '" .. questName .. "' completed."
+                    else
+                        status = "not_found"
+                        message = "Quest '" .. tostring( questSpec ) .. "' not recognized."
+                    end
+                end
+            elseif name == "abandon_quest" then
+                local questSpec = ai_extractQuestSpecifier( args )
+                if not questSpec then
+                    status = "invalid_args"
+                    message = "No quest id specified in args.quest."
+                else
+                    local questName = ai_findQuestName( questSpec )
+                    if questName then
+                        QuestManager.Sv_TryAbandonQuest( questName )
+                        status = "success"
+                        message = "Quest '" .. questName .. "' abandoned."
+                    else
+                        status = "not_found"
+                        message = "Quest '" .. tostring( questSpec ) .. "' not recognized."
+                    end
+                end
             else
-                statusMessage = "Quest not found for completion."
+                status = "unsupported"
+                message = "Action '" .. name .. "' is not supported by game server."
             end
-        elseif name == "abandon_quest" then
-            local questSpec = ai_extractQuestSpecifier( args )
-            local questName = ai_findQuestName( questSpec )
-            if questName then
-                QuestManager.Sv_TryAbandonQuest( questName )
-                statusMessage = "Quest abandon requested: " .. questName
-            else
-                statusMessage = "Quest not found for abandon."
-            end
-        end
 
-        if statusMessage then
-            self.network:sendToClient( player, "cl_n_aiActionStatus", { message = statusMessage } )
+            results[#results + 1] = {
+                name = name,
+                status = status,
+                message = message
+            }
+        end
+    end
+
+    self.network:sendToClient( player, "cl_n_aiActionResults", { responseId = params.responseId, results = results } )
+end
+
+function Game.cl_n_aiActionResults( self, params )
+    if not self.ai then
+        return
+    end
+
+    self.ai.lastActionResults = params.results
+
+    if params.results then
+        for _, res in ipairs( params.results ) do
+            local tag = ( res.status == "success" ) and "[AI action]" or "[AI action: " .. tostring( res.status ) .. "]"
+            sm.gui.chatMessage( tag .. " " .. tostring( res.message ) )
         end
     end
 end
