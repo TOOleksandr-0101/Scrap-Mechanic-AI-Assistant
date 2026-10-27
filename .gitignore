@@ -1,0 +1,36 @@
+# Secrets, API keys, credentials
+*key*.txt
+*.key
+*.env
+.env*
+openrouter_key.txt
+
+# Scrap Mechanic build, cache, and runtime files
+Cache/
+Logs/
+**/Cache/**
+**/Logs/**
+*.dco
+*.cbo
+*.log
+
+# Bridge exchange and temp JSONs
+ai_bridge_request.json
+ai_bridge_response.json
+*.tmp
+
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS and Editor metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.suo
+*.user

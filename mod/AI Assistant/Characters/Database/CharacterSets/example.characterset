@@ -1,0 +1,64 @@
+{
+	"characters":
+	[
+		{
+			"capsule":
+			{
+				"height": 0.8,
+				"radius": 0.35
+			},
+			"character":
+			{
+				"data": {},
+				"scriptClass": "AICowCharacter",
+				"scriptPath": "$CONTENT_DATA/Scripts/characters/AICowCharacter.lua"
+			},
+			"hit":
+			{
+				"stand":
+				{
+					"col": "$SURVIVAL_DATA/Character/Char_babywoc/char_babywoc_hit_col.obj",
+					"offset": [ 0.0, 0.0, 0.25 ]
+				}
+			},
+			"mass": 900.0,
+			"material": "RagdollAnimal",
+			"movement":
+			{
+				"canSwim": true,
+				"crouchSpeed": 3.0,
+				"facingRotationSpeed": 3.1415,
+				"headingRotationSpeed": 3.1415,
+				"moveSpeed": 1.65,
+				"slowDownSpeed": 2.5,
+				"sprintSpeed": 9.0
+			},
+			"name": "AICow",
+			"paint":
+			{
+				"defaultColor": "ef937fff",
+				"effect": "",
+				"enable": false
+			},
+			"ragdoll": "$SURVIVAL_DATA/Character/Char_babywoc/char_babywoc_ragdoll.json",
+			"renderables":
+			[
+				"$SURVIVAL_DATA/Character/Char_babywoc/char_babywoc_tp.rend",
+				"$SURVIVAL_DATA/Character/Char_babywoc/char_babywoc.rend"
+			],
+			"showInEditor": true,
+			"tumble":
+			{
+				"col": "$SURVIVAL_DATA/Character/Char_babywoc/char_babywoc_tumble_col.obj",
+				"offset": [ 0.0, 0.0, 0.6 ]
+			},
+			"unit":
+			{
+				"data": {},
+				"scriptClass": "BabyWocUnit",
+				"scriptPath": "$SURVIVAL_DATA/Scripts/game/units/BabyWocUnit.lua"
+			},
+			"uuid": "4895b33a-ce8f-43d0-8c59-e406d37d8d6b"
+		}
+	]
+}

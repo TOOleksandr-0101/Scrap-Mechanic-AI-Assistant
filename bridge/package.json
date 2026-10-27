@@ -1,0 +1,23 @@
+{
+  "name": "scrap-mechanic-ai-assistant-bridge",
+  "version": "1.0.0",
+  "description": "Node.js bridge connecting Scrap Mechanic AI Assistant mod with OpenRouter LLM",
+  "main": "openrouter_bridge.js",
+  "scripts": {
+    "start": "node openrouter_bridge.js",
+    "build-knowledge": "node tools/build_scrap_knowledge.js"
+  },
+  "keywords": [
+    "scrap-mechanic",
+    "ai",
+    "assistant",
+    "openrouter",
+    "llm",
+    "moomoo"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

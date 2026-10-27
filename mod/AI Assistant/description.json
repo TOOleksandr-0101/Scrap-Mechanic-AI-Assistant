@@ -1,0 +1,9 @@
+{
+	"allow_add_mods" : true,
+	"custom_icons" : false,
+	"description" : "This mod doesn't have a description",
+	"localId" : "651c7c22-95a7-4ca7-bfa8-e2ef16e0df97",
+	"name" : "AI Assistant",
+	"type" : "Custom Game",
+	"version" : 1
+}

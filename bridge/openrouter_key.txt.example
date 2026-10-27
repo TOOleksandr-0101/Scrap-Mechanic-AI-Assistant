@@ -1,0 +1,6 @@
+# Place your OpenRouter API key below (without comments, spaces or extra lines)
+# Example:
+# sk-or-v1-abcdef1234567890abcdef1234567890
+#
+# Alternatively, set the OPENROUTER_API_KEY environment variable.
+# NEVER commit the real openrouter_key.txt to version control!
