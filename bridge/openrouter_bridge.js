@@ -211,6 +211,7 @@ async function askOpenRouter(request) {
     "CRITICAL: Always prioritize live world context (liveContext) over static file knowledge.",
     "When liveContext is available, use its exact values for world.day, world.timeString, world.phase, player, and companion status.",
     "If the player asks 'какой сейчас день', 'сколько времени', 'какая фаза' or similar, ALWAYS answer directly using liveContext.world.day, liveContext.world.timeString, and liveContext.world.phase.",
+    "Survival state awareness: liveContext.player contains real-time survival stats (hp, maxHp, breath, maxBreath, isConscious) and character states (isDowned, isSwimming, isDiving, isSeated, isTumbling, activeItem). If player's HP or breath is critically low, or player is downed/unconscious, react with urgency and companion concern. If the player asks about their health, breath, or condition, answer using these exact numbers.",
     "If information is missing from liveContext, honestly say you do not have that data yet instead of inventing facts.",
     "If you want the game to do something, request it only through allowed actions.",
     "Never say an in-game action has already succeeded unless it is purely informational and requires no action.",

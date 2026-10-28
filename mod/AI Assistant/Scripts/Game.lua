@@ -330,6 +330,23 @@ local function ai_buildPlayerContext()
         context.isDiving = character.isDiving and character:isDiving() or false
         context.isCrouching = character.isCrouching and character:isCrouching() or false
         context.isSprinting = character.isSprinting and character:isSprinting() or false
+        context.isSeated = character.isSeated and character:isSeated() or false
+        context.isTumbling = character.isTumbling and character:isTumbling() or false
+        context.isDowned = character.isDowned and character:isDowned() or false
+    end
+
+    if g_localSurvivalPlayer and g_localSurvivalPlayer.cl and g_localSurvivalPlayer.cl.stats then
+        local stats = g_localSurvivalPlayer.cl.stats
+        context.hp = ai_round( stats.hp or 100 )
+        context.maxHp = ai_round( stats.maxhp or 100 )
+        context.breath = ai_round( stats.breath or 100 )
+        context.maxBreath = ai_round( stats.maxbreath or 100 )
+        context.isConscious = ( g_localSurvivalPlayer.cl.isConscious ~= false )
+    end
+
+    local activeItem = sm.localPlayer and sm.localPlayer.getActiveItem and sm.localPlayer.getActiveItem() or nil
+    if activeItem and tostring( activeItem ) ~= "00000000-0000-0000-0000-000000000000" then
+        context.activeItem = tostring( activeItem )
     end
 
     return context
