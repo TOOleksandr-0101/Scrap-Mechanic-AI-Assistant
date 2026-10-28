@@ -90,7 +90,7 @@
 					"y" : 80
 				},
 				{
-					"Caption" : "Save / Сохр.",
+					"Caption" : "Save",
 					"Childs" : [],
 					"FontName" : "SM_Button",
 					"Name" : "SaveTokenBtn",
@@ -122,7 +122,7 @@
 					"y" : 118
 				},
 				{
-					"Caption" : "AI Model / Модель нейросети:",
+					"Caption" : "AI Model:",
 					"Childs" : [],
 					"FontName" : "SM_Label",
 					"Name" : "ModelSectionLabel",
@@ -217,7 +217,7 @@
 					"y" : 232
 				},
 				{
-					"Caption" : "Companion Language / Язык ответов:",
+					"Caption" : "Companion Language:",
 					"Childs" : [],
 					"FontName" : "SM_Label",
 					"Name" : "LangSectionLabel",
@@ -232,7 +232,7 @@
 					"y" : 258
 				},
 				{
-					"Caption" : "Auto (Авто)",
+					"Caption" : "Auto",
 					"Childs" : [],
 					"FontName" : "SM_Button",
 					"Name" : "Lang_Auto",
@@ -248,7 +248,7 @@
 					"y" : 280
 				},
 				{
-					"Caption" : "Русский (RU)",
+					"Caption" : "Russian (RU)",
 					"Childs" : [],
 					"FontName" : "SM_Button",
 					"Name" : "Lang_RU",
@@ -296,7 +296,7 @@
 					"y" : 314
 				},
 				{
-					"Caption" : "Bridge Connection / Связь с мостом:",
+					"Caption" : "Bridge Connection:",
 					"Childs" : [],
 					"FontName" : "SM_Label",
 					"Name" : "BridgeSectionLabel",
@@ -343,7 +343,7 @@
 					"y" : 384
 				},
 				{
-					"Caption" : "Close / Закрыть (Esc)",
+					"Caption" : "Close (Esc)",
 					"Childs" : [],
 					"FontName" : "SM_Button",
 					"Name" : "CloseSettingsBtn",

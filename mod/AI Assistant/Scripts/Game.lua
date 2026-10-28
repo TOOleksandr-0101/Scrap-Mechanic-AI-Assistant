@@ -18,8 +18,8 @@ local SupportedModels = {
 }
 
 local SupportedLangs = {
-    Lang_Auto = { id = "auto", name = "Auto (Авто)" },
-    Lang_RU = { id = "ru", name = "Русский (RU)" },
+    Lang_Auto = { id = "auto", name = "Auto" },
+    Lang_RU = { id = "ru", name = "Russian (RU)" },
     Lang_EN = { id = "en", name = "English (EN)" }
 }
 
@@ -968,9 +968,9 @@ function Game.cl_updateSettingsGui( self )
     -- Language Status
     local langStatus = FindWidget( json, "CurrentLangLabel" )
     if langStatus then
-        local langTitle = "Auto (Авто)"
+        local langTitle = "Auto"
         if settings.language == "ru" then
-            langTitle = "Русский (RU)"
+            langTitle = "Russian (RU)"
         elseif settings.language == "en" then
             langTitle = "English (EN)"
         end

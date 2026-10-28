@@ -142,7 +142,7 @@
 					"y" : 292
 				},
 				{
-					"Caption" : "AI Settings / Настройки",
+					"Caption" : "AI Settings",
 					"Childs" : [],
 					"FontName" : "SM_Button",
 					"Name" : "SettingsBtn",
