@@ -54,6 +54,13 @@ function AICowCharacter.cl_openAiGui( self )
 	self.cl.aiGui:render( GuiData )
 end
 
+function AICowCharacter.cl_onClickSettings( self, widgetName )
+	if self.cl.aiGui and sm.exists( self.cl.aiGui ) and self.cl.aiGui:isActive() then
+		self.cl.aiGui:close()
+	end
+	sm.event.sendToGame( "cl_e_openAiSettings" )
+end
+
 function AICowCharacter.cl_sendAiPrompt( self, prompt )
 	if not prompt or prompt == "" then
 		return

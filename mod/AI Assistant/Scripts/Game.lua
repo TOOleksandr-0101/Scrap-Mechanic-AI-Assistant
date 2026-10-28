@@ -6,6 +6,23 @@ Game = class( SurvivalGame )
 
 local RequestPath = "$CONTENT_DATA/Cache/ai_bridge_request.json"
 local ResponsePath = "$CONTENT_DATA/Cache/ai_bridge_response.json"
+local SettingsPath = "$CONTENT_DATA/Cache/ai_settings.json"
+local HeartbeatPath = "$CONTENT_DATA/Cache/ai_bridge_heartbeat.json"
+local SettingsGuiPath = "$CONTENT_DATA/Gui/JsonGuis/AISettings.gui"
+
+local SupportedModels = {
+    Model_GPT4 = { id = "openai/gpt-4.1-mini", name = "GPT-4.1 Mini" },
+    Model_Gemini = { id = "google/gemini-3.8-flash", name = "Gemini Flash" },
+    Model_Claude = { id = "anthropic/claude-sonnet-5.5", name = "Claude Sonnet" },
+    Model_DeepSeek = { id = "deepseek/deepseek-chat", name = "DeepSeek Chat" }
+}
+
+local SupportedLangs = {
+    Lang_Auto = { id = "auto", name = "Auto (Авто)" },
+    Lang_RU = { id = "ru", name = "Русский (RU)" },
+    Lang_EN = { id = "en", name = "English (EN)" }
+}
+
 local HistoryLimit = 8
 local NpcName = "MooMoo"
 local KnownQuestAliases = {
@@ -446,6 +463,9 @@ function Game.bindChatCommands( self )
     sm.game.bindChatCommand( "/aifollow", {}, "cl_onChatCommand", "Set AI cow to follow mode" )
     sm.game.bindChatCommand( "/aistay", {}, "cl_onChatCommand", "Set AI cow to stay mode" )
     sm.game.bindChatCommand( "/aicome", {}, "cl_onChatCommand", "Call AI cow to come to you" )
+    sm.game.bindChatCommand( "/aisettings", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
+    sm.game.bindChatCommand( "/aimenu", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
+    sm.game.bindChatCommand( "/ai", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
     sm.game.bindChatCommand(
         "/aiask",
         {
@@ -509,10 +529,22 @@ function Game.client_onUpdate( self, dt )
             self.network:sendToServer( "sv_executeAiActions", { responseId = response.id, actions = response.actions } )
         end
     end
+
+    if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+        self.cl.settingsHeartbeatTimer = ( self.cl.settingsHeartbeatTimer or 0 ) + dt
+        if self.cl.settingsHeartbeatTimer >= 1.5 then
+            self.cl.settingsHeartbeatTimer = 0
+            self:cl_updateSettingsGui()
+            self.cl.settingsGui:render( self.cl.settingsGuiJson )
+        end
+    end
 end
 
 function Game.cl_onChatCommand( self, params )
-    if params[1] == "/ainpc" then
+    if params[1] == "/aisettings" or params[1] == "/aimenu" or params[1] == "/ai" then
+        self:cl_openSettingsGui()
+        return
+    elseif params[1] == "/ainpc" then
         local mode = params[2]
         if mode == "off" then
             self.ai.npcEnabled = false
@@ -854,4 +886,168 @@ end
 
 function Game.cl_n_aiActionStatus( self, params )
     sm.gui.chatMessage( "[AI action] " .. tostring( params.message ) )
+end
+
+function Game.cl_loadAiSettings( self )
+    local settings = ai_loadJson( SettingsPath )
+    if not settings then
+        settings = {
+            apiKey = "",
+            model = "openai/gpt-4.1-mini",
+            language = "auto"
+        }
+    end
+    if not settings.model or settings.model == "" then
+        settings.model = "openai/gpt-4.1-mini"
+    end
+    if not settings.language or settings.language == "" then
+        settings.language = "auto"
+    end
+    self.aiSettings = settings
+    return settings
+end
+
+function Game.cl_saveAiSettings( self, settings )
+    self.aiSettings = settings
+    ai_saveJson( SettingsPath, settings )
+end
+
+function Game.cl_e_openAiSettings( self )
+    self:cl_openSettingsGui()
+end
+
+function Game.cl_openSettingsGui( self )
+    if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+        self.cl.settingsGui:close()
+    end
+
+    self:cl_loadAiSettings()
+    self.cl.tokenDraft = self.aiSettings.apiKey or ""
+
+    if not self.cl.settingsGuiJson then
+        self.cl.settingsGuiJson = sm.json.open( SettingsGuiPath )
+    end
+
+    self.cl.settingsGui = sm.jsonGui.createGui( { isInteractive = true, bNeedsCursor = true, hidesHotbar = true } )
+    self:cl_updateSettingsGui()
+    self.cl.settingsGui:render( self.cl.settingsGuiJson )
+end
+
+function Game.cl_updateSettingsGui( self )
+    if not self.cl.settingsGuiJson then return end
+
+    local json = self.cl.settingsGuiJson
+    local settings = self.aiSettings or self:cl_loadAiSettings()
+
+    -- Token Input and Status
+    local tokenInput = FindWidget( json, "TokenInput" )
+    if tokenInput then
+        tokenInput.Caption = self.cl.tokenDraft or ""
+    end
+
+    local tokenStatus = FindWidget( json, "TokenStatusLabel" )
+    if tokenStatus then
+        if settings.apiKey and #settings.apiKey > 8 then
+            local prefix = string.sub( settings.apiKey, 1, 8 )
+            local suffix = string.sub( settings.apiKey, -4 )
+            tokenStatus.Caption = "Token: Configured (" .. prefix .. "..." .. suffix .. ")"
+            tokenStatus.TextColour = "0.3 0.9 0.3 1"
+        else
+            tokenStatus.Caption = "Token: Not set! Enter token above and click Save."
+            tokenStatus.TextColour = "0.95 0.3 0.3 1"
+        end
+    end
+
+    -- Model Status
+    local modelStatus = FindWidget( json, "CurrentModelLabel" )
+    if modelStatus then
+        modelStatus.Caption = "Active Model: " .. ( settings.model or "openai/gpt-4.1-mini" )
+        modelStatus.TextColour = "0.3 0.9 0.3 1"
+    end
+
+    -- Language Status
+    local langStatus = FindWidget( json, "CurrentLangLabel" )
+    if langStatus then
+        local langTitle = "Auto (Авто)"
+        if settings.language == "ru" then
+            langTitle = "Русский (RU)"
+        elseif settings.language == "en" then
+            langTitle = "English (EN)"
+        end
+        langStatus.Caption = "Active Language: " .. langTitle
+        langStatus.TextColour = "0.3 0.9 0.3 1"
+    end
+
+    -- Bridge Heartbeat
+    local bridgeStatus = FindWidget( json, "BridgeStatusLabel" )
+    if bridgeStatus then
+        local heartbeat = ai_loadJson( HeartbeatPath )
+        if heartbeat and heartbeat.status == "online" then
+            bridgeStatus.Caption = "Bridge Status: Online (Ready)"
+            bridgeStatus.TextColour = "0.3 0.9 0.3 1"
+        else
+            bridgeStatus.Caption = "Bridge Status: Offline (Run Start_AI_Assistant.bat)"
+            bridgeStatus.TextColour = "0.95 0.5 0.2 1"
+        end
+    end
+end
+
+function Game.cl_onTokenEdit( self, widgetName, text )
+    self.cl.tokenDraft = text
+end
+
+function Game.cl_onTokenEnter( self, widgetName, text )
+    self.cl.tokenDraft = text
+    self:cl_onClickSaveToken( "SaveTokenBtn" )
+end
+
+function Game.cl_onClickSaveToken( self, widgetName )
+    local settings = self.aiSettings or self:cl_loadAiSettings()
+    local trimmed = self.cl.tokenDraft and string.gsub( self.cl.tokenDraft, "^%s*(.-)%s*$", "%1" ) or ""
+    settings.apiKey = trimmed
+    self:cl_saveAiSettings( settings )
+    self:cl_updateSettingsGui()
+    if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+        self.cl.settingsGui:render( self.cl.settingsGuiJson )
+    end
+    sm.gui.chatMessage( "[MooMoo] Settings saved: API token updated!" )
+end
+
+function Game.cl_onClickModel( self, widgetName )
+    local modelInfo = SupportedModels[widgetName]
+    if modelInfo then
+        local settings = self.aiSettings or self:cl_loadAiSettings()
+        settings.model = modelInfo.id
+        self:cl_saveAiSettings( settings )
+        self:cl_updateSettingsGui()
+        if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+            self.cl.settingsGui:render( self.cl.settingsGuiJson )
+        end
+        sm.gui.chatMessage( "[MooMoo] Model switched to: " .. modelInfo.name )
+    end
+end
+
+function Game.cl_onClickLanguage( self, widgetName )
+    local langInfo = SupportedLangs[widgetName]
+    if langInfo then
+        local settings = self.aiSettings or self:cl_loadAiSettings()
+        settings.language = langInfo.id
+        self:cl_saveAiSettings( settings )
+        self:cl_updateSettingsGui()
+        if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+            self.cl.settingsGui:render( self.cl.settingsGuiJson )
+        end
+        sm.gui.chatMessage( "[MooMoo] Companion language: " .. langInfo.name )
+    end
+end
+
+function Game.cl_onClickCloseSettings( self, widgetName )
+    if self.cl.settingsGui and sm.exists( self.cl.settingsGui ) and self.cl.settingsGui:isActive() then
+        self.cl.settingsGui:close()
+    end
+    self.cl.settingsGui = nil
+end
+
+function Game.cl_onSettingsClosed( self )
+    self.cl.settingsGui = nil
 end

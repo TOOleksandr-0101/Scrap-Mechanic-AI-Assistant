@@ -140,6 +140,22 @@
 					"width" : 330,
 					"x" : 10,
 					"y" : 292
+				},
+				{
+					"Caption" : "AI Settings / Настройки",
+					"Childs" : [],
+					"FontName" : "SM_Button",
+					"Name" : "SettingsBtn",
+					"NeedKey" : false,
+					"NeedMouse" : true,
+					"Skin" : "PrimaryButton",
+					"TextAlign" : "Center",
+					"Type" : "Button",
+					"height" : 30,
+					"onClick" : "cl_onClickSettings",
+					"width" : 200,
+					"x" : 75,
+					"y" : 314
 				}
 			],
 			"LayoutRule" : "Absolute",
@@ -149,7 +165,7 @@
 			"Skin" : "PanelEmpty",
 			"Type" : "Widget",
 			"Visible" : true,
-			"height" : 320,
+			"height" : 350,
 			"width" : 360,
 			"x" : 16,
 			"y" : 14
@@ -162,7 +178,7 @@
 	"NeedMouse" : true,
 	"Skin" : "BackgroundInteractableNarrow",
 	"Type" : "Widget",
-	"height" : 350,
+	"height" : 380,
 	"width" : 392,
 	"x" : 0,
 	"y" : 0

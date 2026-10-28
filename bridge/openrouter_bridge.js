@@ -36,6 +36,8 @@ function resolveBridgeCacheDir() {
 const BRIDGE_ROOT = resolveBridgeCacheDir();
 const REQUEST_PATH = path.join(BRIDGE_ROOT, "ai_bridge_request.json");
 const RESPONSE_PATH = path.join(BRIDGE_ROOT, "ai_bridge_response.json");
+const SETTINGS_PATH = path.join(BRIDGE_ROOT, "ai_settings.json");
+const HEARTBEAT_PATH = path.join(BRIDGE_ROOT, "ai_bridge_heartbeat.json");
 const KEY_PATH = process.env.OPENROUTER_KEY_FILE || path.join(__dirname, "openrouter_key.txt");
 const KNOWLEDGE_PATH = process.env.SCRAP_KNOWLEDGE_PATH || path.join(__dirname, "scrap_knowledge_index.json");
 
@@ -61,6 +63,11 @@ let lastHandledId = 0;
 let cachedKnowledge = null;
 
 function getApiKey() {
+  const settings = readJson(SETTINGS_PATH);
+  if (settings && typeof settings.apiKey === "string" && settings.apiKey.trim()) {
+    return settings.apiKey.trim();
+  }
+
   if (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim()) {
     return process.env.OPENROUTER_API_KEY.trim();
   }
@@ -201,13 +208,24 @@ async function askOpenRouter(request) {
     };
   }
 
+  const settings = readJson(SETTINGS_PATH) || {};
+  const currentModel = (typeof settings.model === "string" && settings.model.trim()) ? settings.model.trim() : OPENROUTER_MODEL;
+  const currentLang = settings.language || "auto";
+
+  let languageInstruction = "Use natural Russian if the player writes in Russian; otherwise match the player's language.";
+  if (currentLang === "ru") {
+    languageInstruction = "CRITICAL LANGUAGE DIRECTIVE: You MUST speak and reply strictly in natural Russian at all times, regardless of player input language.";
+  } else if (currentLang === "en") {
+    languageInstruction = "CRITICAL LANGUAGE DIRECTIVE: You MUST speak and reply strictly in fluent English at all times, regardless of player input language.";
+  }
+
   const systemPrompt = [
     `You are ${npcName}, a baby woc companion inside Scrap Mechanic.`,
     "You think and speak from the first person as a friendly, helpful baby woc companion.",
     "Think silently and carefully about the player's intent, whether an allowed in-game action is needed, and which arguments are correct.",
     "Do not reveal internal reasoning. Output only the final JSON object.",
     "Be concise, helpful, grounded, and slightly scrappy.",
-    "Use natural Russian if the player writes in Russian; otherwise match the player's language.",
+    languageInstruction,
     "CRITICAL: Always prioritize live world context (liveContext) over static file knowledge.",
     "When liveContext is available, use its exact values for world.day, world.timeString, world.phase, player, and companion status.",
     "If the player asks 'какой сейчас день', 'сколько времени', 'какая фаза' or similar, ALWAYS answer directly using liveContext.world.day, liveContext.world.timeString, and liveContext.world.phase.",
@@ -284,7 +302,7 @@ async function askOpenRouter(request) {
       "X-Title": "Scrap Mechanic AI Assistant"
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: currentModel,
       messages
     })
   });
@@ -306,6 +324,21 @@ async function askOpenRouter(request) {
     reply: structured.reply,
     actions: structured.actions
   };
+}
+
+function sendHeartbeat() {
+  try {
+    const settings = readJson(SETTINGS_PATH) || {};
+    const key = getApiKey();
+    const heartbeat = {
+      status: "online",
+      timestamp: Date.now(),
+      model: (typeof settings.model === "string" && settings.model.trim()) ? settings.model.trim() : OPENROUTER_MODEL,
+      language: settings.language || "auto",
+      hasKey: Boolean(key && key.length > 5)
+    };
+    writeJson(HEARTBEAT_PATH, heartbeat);
+  } catch {}
 }
 
 async function tick() {
@@ -331,14 +364,19 @@ async function tick() {
 console.log("==================================================");
 console.log("  Scrap Mechanic AI Assistant Bridge (OpenRouter)");
 console.log("==================================================");
-console.log(`[bridge] Model:       ${OPENROUTER_MODEL}`);
-console.log(`[bridge] Cache dir:   ${BRIDGE_ROOT}`);
-console.log(`[bridge] Request:     ${REQUEST_PATH}`);
-console.log(`[bridge] Response:    ${RESPONSE_PATH}`);
-console.log(`[bridge] Key path:    ${KEY_PATH} (exists: ${fs.existsSync(KEY_PATH)})`);
-console.log(`[bridge] Knowledge:   ${KNOWLEDGE_PATH} (exists: ${fs.existsSync(KNOWLEDGE_PATH)})`);
+console.log(`[bridge] Default Model: ${OPENROUTER_MODEL}`);
+console.log(`[bridge] Cache dir:     ${BRIDGE_ROOT}`);
+console.log(`[bridge] Request:       ${REQUEST_PATH}`);
+console.log(`[bridge] Response:      ${RESPONSE_PATH}`);
+console.log(`[bridge] Settings:      ${SETTINGS_PATH}`);
+console.log(`[bridge] Heartbeat:     ${HEARTBEAT_PATH}`);
+console.log(`[bridge] Key path:      ${KEY_PATH} (exists: ${fs.existsSync(KEY_PATH)})`);
+console.log(`[bridge] Knowledge:     ${KNOWLEDGE_PATH} (exists: ${fs.existsSync(KNOWLEDGE_PATH)})`);
 console.log("--------------------------------------------------");
 console.log("[bridge] Listening for in-game /aiask requests...");
+
+sendHeartbeat();
+setInterval(sendHeartbeat, 2500);
 
 setInterval(() => {
   tick().catch((error) => console.error("[bridge] tick failed", error));
