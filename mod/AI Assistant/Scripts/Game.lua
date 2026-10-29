@@ -713,6 +713,129 @@ function Game.server_onFixedUpdate( self, timeStep )
     self:sv_updateCompanionVehicle( timeStep )
 end
 
+local function ai_getCompanionCharacter( player )
+    local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
+    if followerData then
+        if followerData.unit and sm.exists( followerData.unit ) and followerData.unit.character and sm.exists( followerData.unit.character ) then
+            return followerData.unit.character, followerData.playerToFollow or player
+        end
+        if followerData.character and sm.exists( followerData.character ) then
+            return followerData.character, followerData.playerToFollow or player
+        end
+    end
+
+    if not player then
+        local players = sm.player.getAllPlayers()
+        if players and #players > 0 then
+            player = players[1]
+        end
+    end
+
+    if player and sm.exists( player ) and player.character and sm.exists( player.character ) then
+        local pPos = player.character.worldPosition
+        local success, contacts = pcall( sm.physics.getSphereContacts, pPos, 35.0 )
+        if success and contacts and contacts.characters then
+            for _, ch in ipairs( contacts.characters ) do
+                if sm.exists( ch ) and ch:isNpc() then
+                    local t = tostring( ch:getCharacterType() )
+                    if t == tostring( unit_baby_woc ) or string.find( t:lower(), "baby" ) or string.find( t:lower(), "woc" ) then
+                        return ch, player
+                    end
+                end
+            end
+        end
+    end
+    return nil, player
+end
+
+function Game.sv_executeAiAttack( self, player )
+    local cowChar, p = ai_getCompanionCharacter( player )
+    local originPos = nil
+    if cowChar and sm.exists( cowChar ) then
+        originPos = cowChar.worldPosition
+    elseif player and player.character and sm.exists( player.character ) then
+        originPos = player.character.worldPosition
+    end
+
+    if not originPos then
+        return false, "Could not locate companion or player position."
+    end
+
+    -- Scan for hostile characters within 35m
+    local bestEnemy = nil
+    local bestDist = 35.0
+    local success, contacts = pcall( sm.physics.getSphereContacts, originPos, 35.0 )
+    if success and contacts and contacts.characters then
+        for _, char in ipairs( contacts.characters ) do
+            if sm.exists( char ) and char:isNpc() and ( not cowChar or char ~= cowChar ) then
+                local charType = tostring( char:getCharacterType() )
+                local isHostile = ( charType == tostring( unit_haybot ) or
+                                   charType == tostring( unit_totebot_green ) or
+                                   charType == tostring( unit_totebot_blue ) or
+                                   charType == tostring( unit_totebot_red ) or
+                                   charType == tostring( unit_totebot_yellow ) or
+                                   charType == tostring( unit_tapebot ) or
+                                   charType == tostring( unit_tapebot_red ) or
+                                   charType == tostring( unit_farmbot ) or
+                                   charType == tostring( unit_cablebot ) or
+                                   string.find( charType:lower(), "bot" ) )
+                if isHostile then
+                    local d = ( char.worldPosition - originPos ):length()
+                    if d < bestDist then
+                        bestDist = d
+                        bestEnemy = char
+                    end
+                end
+            end
+        end
+    end
+
+    if not bestEnemy or not sm.exists( bestEnemy ) then
+        return false, "No hostile robots detected within 35 meters."
+    end
+
+    local enemyPos = bestEnemy.worldPosition
+    local hitDir = ( enemyPos - originPos ):safeNormalize( sm.vec3.new( 0, 0, 1 ) )
+
+    -- Leap companion to enemy
+    if cowChar and sm.exists( cowChar ) then
+        pcall( function()
+            cowChar.worldPosition = enemyPos - hitDir * 1.2 + sm.vec3.new( 0, 0, 0.25 )
+        end )
+    end
+
+    -- Apply knockback
+    pcall( function() ApplyKnockback( bestEnemy, hitDir, 5000 ) end )
+
+    -- Apply damage to unit
+    local enemyUnit = bestEnemy:getUnit()
+    local damageDealt = 45
+    if enemyUnit and sm.exists( enemyUnit ) then
+        pcall( function()
+            sm.event.sendToUnit( enemyUnit, "sv_e_receiveDamage", {
+                damage = damageDealt,
+                source = "impact",
+                hitPos = enemyPos,
+                impact = hitDir * 5000
+            } )
+        end )
+    end
+
+    -- Sound and visual effects
+    pcall( sm.effect.playEffect, "Sledgehammer - Hit", enemyPos )
+    pcall( sm.effect.playEffect, "Babywoc - Moo", originPos )
+
+    local msg = NpcName .. " headbutted the enemy for " .. tostring( damageDealt ) .. " damage!"
+    if player and sm.exists( player ) then
+        self.network:sendToClient( player, "cl_n_npcStatus", { message = msg } )
+    end
+    return true, msg
+end
+
+function Game.sv_requestAiAttack( self, params, player )
+    self:sv_executeAiAttack( player )
+end
+
 function Game.sv_updateCompanionVehicle( self, timeStep )
     self.sv = self.sv or {}
     self.sv.vehicleCheckTimer = ( self.sv.vehicleCheckTimer or 0 ) + timeStep
@@ -721,27 +844,24 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
     end
     self.sv.vehicleCheckTimer = 0
 
-    local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
-    if not followerData then
-        return
-    end
-
-    local cowChar = ( followerData.character and sm.exists( followerData.character ) ) and followerData.character or nil
-    local player = ( followerData.playerToFollow and sm.exists( followerData.playerToFollow ) ) and followerData.playerToFollow or nil
+    local cowChar, player = ai_getCompanionCharacter( nil )
     if not cowChar or not player then
         return
     end
 
     local playerChar = ( player.character and sm.exists( player.character ) ) and player.character or nil
     if not playerChar or playerChar:isDowned() then
-        if self.sv.cowSeatedSeat or cowChar:isSeated() then
+        if self.sv.cowSeatedSeat or cowChar:isSeated() or cowChar:getLockingInteractable() ~= nil then
             if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
                 pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
             end
             self.sv.cowSeatedSeat = nil
             local lockingIt = cowChar:getLockingInteractable()
-            if lockingIt and sm.exists( lockingIt ) and lockingIt:hasSeat() then
-                pcall( function() lockingIt:setSeatCharacter( nil ) end )
+            if lockingIt and sm.exists( lockingIt ) then
+                pcall( function()
+                    if lockingIt:hasSeat() then lockingIt:setSeatCharacter( nil ) end
+                    cowChar:setLockingInteractable( nil )
+                end )
             end
         end
         return
@@ -762,7 +882,12 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
 
         -- If cow is already in our recorded passenger seat, make sure it's still valid
         if self.sv.cowSeatedSeat then
-            if sm.exists( self.sv.cowSeatedSeat ) and self.sv.cowSeatedSeat:getSeatCharacter() == cowChar then
+            if sm.exists( self.sv.cowSeatedSeat ) and ( self.sv.cowSeatedSeat:getSeatCharacter() == cowChar or cowChar:getLockingInteractable() == self.sv.cowSeatedSeat ) then
+                -- Keep cow character locked to seat position and velocity with the vehicle
+                pcall( function()
+                    cowChar.worldPosition = self.sv.cowSeatedSeat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
+                    cowChar.velocity = driverBody.velocity
+                end )
                 return
             else
                 self.sv.cowSeatedSeat = nil
@@ -770,7 +895,7 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
         end
 
         -- Scan ONLY the exact same creation (all bodies connected to the driver's vehicle)
-        if not cowChar:isSeated() then
+        if not cowChar:isSeated() and cowChar:getLockingInteractable() == nil then
             local creationBodies = driverBody:getCreationBodies()
             local bestSeat = nil
             local bestDist = 999999
@@ -782,7 +907,8 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
                         if sm.exists( shape ) then
                             local it = shape.interactable
                             if it and sm.exists( it ) and it:hasSeat() and it ~= driverSeat then
-                                if it:getSeatCharacter() == nil then
+                                local occChar = it:getSeatCharacter()
+                                if occChar == nil or occChar == cowChar then
                                     local dist = ( shape.worldPosition - driverPos ):length()
                                     if dist < bestDist then
                                         bestDist = dist
@@ -796,8 +922,23 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
             end
 
             if bestSeat then
-                local success = pcall( function() bestSeat:setSeatCharacter( cowChar ) end )
-                if success then
+                local seatedOk = false
+                pcall( function()
+                    bestSeat:setSeatCharacter( cowChar )
+                    if bestSeat:getSeatCharacter() == cowChar or cowChar:isSeated() then
+                        seatedOk = true
+                    end
+                end )
+
+                if not seatedOk then
+                    pcall( function()
+                        cowChar:setLockingInteractable( bestSeat )
+                        cowChar.worldPosition = bestSeat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
+                        seatedOk = true
+                    end )
+                end
+
+                if seatedOk then
                     self.sv.cowSeatedSeat = bestSeat
                     pcall( sm.effect.playEffect, "Babywoc - Moo", bestSeat.shape.worldPosition )
                     self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped into the passenger seat!" } )
@@ -806,15 +947,20 @@ function Game.sv_updateCompanionVehicle( self, timeStep )
         end
     else
         -- Player is on foot! If companion was seated in passenger seat, unseat and place next to player
-        if self.sv.cowSeatedSeat or cowChar:isSeated() then
+        if self.sv.cowSeatedSeat or cowChar:isSeated() or cowChar:getLockingInteractable() ~= nil then
             if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
                 pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
             end
             self.sv.cowSeatedSeat = nil
 
             local lockingIt = cowChar:getLockingInteractable()
-            if lockingIt and sm.exists( lockingIt ) and lockingIt:hasSeat() then
-                pcall( function() lockingIt:setSeatCharacter( nil ) end )
+            if lockingIt and sm.exists( lockingIt ) then
+                pcall( function()
+                    if lockingIt:hasSeat() then
+                        lockingIt:setSeatCharacter( nil )
+                    end
+                    cowChar:setLockingInteractable( nil )
+                end )
             end
 
             local dropPos = playerChar.worldPosition + playerChar.direction * 1.5
@@ -912,6 +1058,7 @@ function Game.bindChatCommands( self )
     sm.game.bindChatCommand( "/aifollow", {}, "cl_onChatCommand", "Set AI cow to follow mode" )
     sm.game.bindChatCommand( "/aistay", {}, "cl_onChatCommand", "Set AI cow to stay mode" )
     sm.game.bindChatCommand( "/aicome", {}, "cl_onChatCommand", "Call AI cow to come to you" )
+    sm.game.bindChatCommand( "/aiattack", {}, "cl_onChatCommand", "Order companion to attack nearby hostile bots" )
     sm.game.bindChatCommand( "/aisettings", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
     sm.game.bindChatCommand( "/aimenu", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
     sm.game.bindChatCommand( "/ai", {}, "cl_onChatCommand", "Open AI Assistant Settings" )
@@ -1040,6 +1187,10 @@ function Game.cl_onChatCommand( self, params )
     elseif params[1] == "/aicome" then
         self.network:sendToServer( "sv_requestAiCowMode", { mode = "come" } )
         sm.gui.chatMessage( "[AI Cow] come mode." )
+        return
+    elseif params[1] == "/aiattack" then
+        self.network:sendToServer( "sv_requestAiAttack" )
+        sm.gui.chatMessage( "[" .. self.ai.npcName .. "] Attack order received!" )
         return
     elseif params[1] == "/aiask" then
         local words = {}
@@ -1334,9 +1485,9 @@ function Game.sv_executeAiActions( self, params, player )
                 end
 
                 local targetPos = nil
-                local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
-                if followerData and followerData.character and sm.exists( followerData.character ) then
-                    targetPos = followerData.character.worldPosition
+                local cowChar, p = ai_getCompanionCharacter( player )
+                if cowChar and sm.exists( cowChar ) then
+                    targetPos = cowChar.worldPosition
                 elseif player.character and sm.exists( player.character ) then
                     targetPos = player.character.worldPosition
                 end
@@ -1352,6 +1503,10 @@ function Game.sv_executeAiActions( self, params, player )
                     status = "failure"
                     message = "Could not locate companion or player position for emote."
                 end
+            elseif name == "attack_target" or name == "attack" then
+                local ok, attackMsg = self:sv_executeAiAttack( player )
+                status = ok and "success" or "failure"
+                message = attackMsg
             else
                 status = "unsupported"
                 message = "Action '" .. name .. "' is not supported by game server."

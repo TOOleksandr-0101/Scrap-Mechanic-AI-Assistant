@@ -57,26 +57,37 @@ const AI_ACTIONS = [
   "activate_quest",
   "complete_quest",
   "abandon_quest",
-  "emote"
+  "emote",
+  "attack_target"
 ];
 
 let lastHandledId = 0;
 let cachedKnowledge = null;
 
+function normalizeApiKey(key) {
+  if (!key || typeof key !== "string") return "";
+  let k = key.trim();
+  if (k.startsWith("-or-v1")) {
+    k = "sk" + k;
+  }
+  return k;
+}
+
 function getApiKey() {
   const settings = readJson(SETTINGS_PATH);
   if (settings && typeof settings.apiKey === "string" && settings.apiKey.trim()) {
-    return settings.apiKey.trim();
+    const norm = normalizeApiKey(settings.apiKey);
+    if (norm.length > 20) return norm;
   }
 
   if (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim()) {
-    return process.env.OPENROUTER_API_KEY.trim();
+    return normalizeApiKey(process.env.OPENROUTER_API_KEY);
   }
 
   if (fs.existsSync(KEY_PATH)) {
     try {
       const key = fs.readFileSync(KEY_PATH, "utf8").trim();
-      if (key) return key;
+      if (key) return normalizeApiKey(key);
     } catch {}
   }
 
@@ -236,6 +247,7 @@ async function askOpenRouter(request) {
     "Companion backpack: liveContext.companion.backpack shows if you are carrying food (hasBaguette) or light (hasGlowstick). Answer accurately if the player asks what you have or what is in your backpack.",
     "Vehicle and driving awareness: liveContext.companion.isSeated shows if you are currently seated as a passenger in the player's vehicle, and liveContext.player.isSeated shows if the player is driving/seated. When the player sits in a vehicle driver seat, you automatically mount an available passenger seat on that same vehicle. If the player asks about driving, riding along, or tells you to hop in, speak as an excited co-driver/passenger sitting beside them.",
     "Emotes: You can play in-game sounds via {\"name\":\"emote\",\"args\":{\"type\":\"moo\"}} (happy sound), {\"name\":\"emote\",\"args\":{\"type\":\"panic\"}} (scared sound), or {\"name\":\"emote\",\"args\":{\"type\":\"eat\"}} (chewing sound).",
+    "Combat Defense: You can attack and knock back hostile robots (Haybots, Totebots, Tapebots, Farmbots) with {\"name\":\"attack_target\",\"args\":{}} using a headbutt ram attack. When the player commands 'атака', 'фас', 'бей', or asks you to attack, trigger the attack_target action.",
     "If information is missing from liveContext, honestly say you do not have that data yet instead of inventing facts.",
     "If you want the game to do something, request it only through allowed actions.",
     "Never say an in-game action has already succeeded unless it is purely informational and requires no action.",
