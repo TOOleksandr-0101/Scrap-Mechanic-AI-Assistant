@@ -433,6 +433,7 @@ local function ai_buildCompanionContext( playerPos )
         name = NpcName,
         present = false,
         distanceToPlayer = nil,
+        isSeated = false,
         backpack = {
             hasBaguette = false,
             hasGlowstick = false,
@@ -461,6 +462,9 @@ local function ai_buildCompanionContext( playerPos )
                 y = ai_round( charPos.y ),
                 z = ai_round( charPos.z )
             }
+            if followerData.character.isSeated then
+                companion.isSeated = followerData.character:isSeated()
+            end
             if playerPos then
                 local dist = ( charPos - playerPos ):length()
                 companion.distanceToPlayer = ai_round( dist )
@@ -696,7 +700,129 @@ function Game.server_onCreate( self )
 
     SurvivalGame.server_onCreate( self )
     sm.world.createWorld = originalCreateWorld
+
+    self.sv = self.sv or {}
+    self.sv.cowSeatedSeat = nil
+    self.sv.vehicleCheckTimer = 0
+
 	print("Game.server_onCreate")
+end
+
+function Game.server_onFixedUpdate( self, timeStep )
+    SurvivalGame.server_onFixedUpdate( self, timeStep )
+    self:sv_updateCompanionVehicle( timeStep )
+end
+
+function Game.sv_updateCompanionVehicle( self, timeStep )
+    self.sv = self.sv or {}
+    self.sv.vehicleCheckTimer = ( self.sv.vehicleCheckTimer or 0 ) + timeStep
+    if self.sv.vehicleCheckTimer < 0.25 then
+        return
+    end
+    self.sv.vehicleCheckTimer = 0
+
+    local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
+    if not followerData then
+        return
+    end
+
+    local cowChar = ( followerData.character and sm.exists( followerData.character ) ) and followerData.character or nil
+    local player = ( followerData.playerToFollow and sm.exists( followerData.playerToFollow ) ) and followerData.playerToFollow or nil
+    if not cowChar or not player then
+        return
+    end
+
+    local playerChar = ( player.character and sm.exists( player.character ) ) and player.character or nil
+    if not playerChar or playerChar:isDowned() then
+        if self.sv.cowSeatedSeat or cowChar:isSeated() then
+            if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
+                pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
+            end
+            self.sv.cowSeatedSeat = nil
+            local lockingIt = cowChar:getLockingInteractable()
+            if lockingIt and sm.exists( lockingIt ) and lockingIt:hasSeat() then
+                pcall( function() lockingIt:setSeatCharacter( nil ) end )
+            end
+        end
+        return
+    end
+
+    local isPlayerSeated = playerChar:isSeated()
+
+    if isPlayerSeated then
+        local driverSeat = playerChar:getLockingInteractable()
+        if not driverSeat or not sm.exists( driverSeat ) or not driverSeat:hasSeat() then
+            return
+        end
+
+        local driverBody = driverSeat:getBody()
+        if not driverBody or not sm.exists( driverBody ) then
+            return
+        end
+
+        -- If cow is already in our recorded passenger seat, make sure it's still valid
+        if self.sv.cowSeatedSeat then
+            if sm.exists( self.sv.cowSeatedSeat ) and self.sv.cowSeatedSeat:getSeatCharacter() == cowChar then
+                return
+            else
+                self.sv.cowSeatedSeat = nil
+            end
+        end
+
+        -- Scan ONLY the exact same creation (all bodies connected to the driver's vehicle)
+        if not cowChar:isSeated() then
+            local creationBodies = driverBody:getCreationBodies()
+            local bestSeat = nil
+            local bestDist = 999999
+            local driverPos = driverSeat.shape.worldPosition
+
+            for _, body in ipairs( creationBodies ) do
+                if sm.exists( body ) then
+                    for _, shape in ipairs( body:getShapes() ) do
+                        if sm.exists( shape ) then
+                            local it = shape.interactable
+                            if it and sm.exists( it ) and it:hasSeat() and it ~= driverSeat then
+                                if it:getSeatCharacter() == nil then
+                                    local dist = ( shape.worldPosition - driverPos ):length()
+                                    if dist < bestDist then
+                                        bestDist = dist
+                                        bestSeat = it
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            if bestSeat then
+                local success = pcall( function() bestSeat:setSeatCharacter( cowChar ) end )
+                if success then
+                    self.sv.cowSeatedSeat = bestSeat
+                    pcall( sm.effect.playEffect, "Babywoc - Moo", bestSeat.shape.worldPosition )
+                    self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped into the passenger seat!" } )
+                end
+            end
+        end
+    else
+        -- Player is on foot! If companion was seated in passenger seat, unseat and place next to player
+        if self.sv.cowSeatedSeat or cowChar:isSeated() then
+            if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
+                pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
+            end
+            self.sv.cowSeatedSeat = nil
+
+            local lockingIt = cowChar:getLockingInteractable()
+            if lockingIt and sm.exists( lockingIt ) and lockingIt:hasSeat() then
+                pcall( function() lockingIt:setSeatCharacter( nil ) end )
+            end
+
+            local dropPos = playerChar.worldPosition + playerChar.direction * 1.5
+            pcall( function() cowChar.worldPosition = dropPos end )
+            pcall( sm.effect.playEffect, "Babywoc - Moo", dropPos )
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped out of the vehicle." } )
+        end
+    end
 end
 
 function Game.client_onCreate( self )

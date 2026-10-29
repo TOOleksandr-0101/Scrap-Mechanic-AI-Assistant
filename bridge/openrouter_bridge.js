@@ -234,6 +234,7 @@ async function askOpenRouter(request) {
     "Radar awareness: liveContext.radar contains a real-time scan of nearby entities within 60 meters (threatLevel: 'safe', 'caution', 'danger'; enemies list with type, distance in meters, and direction; animals list with friendly creatures). If the player asks who is nearby or if it's safe, describe the radar findings. If threatLevel is 'danger', warn the player urgently and feel free to trigger the 'emote' action with args.type: 'panic'.",
     "GPS Landmark navigation: liveContext.landmarks contains known discovered world locations (Mechanic Station, Crashed Ship, Hideout/Trader, Packing Stations) with exact distance and compass direction from the player. If the player asks for directions or where a landmark is, guide them with the exact heading and distance.",
     "Companion backpack: liveContext.companion.backpack shows if you are carrying food (hasBaguette) or light (hasGlowstick). Answer accurately if the player asks what you have or what is in your backpack.",
+    "Vehicle and driving awareness: liveContext.companion.isSeated shows if you are currently seated as a passenger in the player's vehicle, and liveContext.player.isSeated shows if the player is driving/seated. When the player sits in a vehicle driver seat, you automatically mount an available passenger seat on that same vehicle. If the player asks about driving, riding along, or tells you to hop in, speak as an excited co-driver/passenger sitting beside them.",
     "Emotes: You can play in-game sounds via {\"name\":\"emote\",\"args\":{\"type\":\"moo\"}} (happy sound), {\"name\":\"emote\",\"args\":{\"type\":\"panic\"}} (scared sound), or {\"name\":\"emote\",\"args\":{\"type\":\"eat\"}} (chewing sound).",
     "If information is missing from liveContext, honestly say you do not have that data yet instead of inventing facts.",
     "If you want the game to do something, request it only through allowed actions.",
@@ -314,6 +315,7 @@ async function askOpenRouter(request) {
 
   const json = await response.json();
   const reply = json?.choices?.[0]?.message?.content;
+  console.log(`[bridge] Raw model response:`, reply);
 
   if (!response.ok) {
     return {
