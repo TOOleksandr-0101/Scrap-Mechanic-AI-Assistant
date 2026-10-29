@@ -870,6 +870,41 @@ end
 
 function Game.bindChatCommands( self )
     SurvivalGame.bindChatCommands( self )
+
+    -- Guarantee Survival developer & cheat commands are always available
+    sm.game.bindChatCommand( "/unlimited", {}, "cl_onChatCommand", "Use the unlimited inventory" )
+    sm.game.bindChatCommand( "/limited", {}, "cl_onChatCommand", "Use the limited inventory" )
+    sm.game.bindChatCommand( "/god", {}, "cl_onChatCommand", "Mechanic characters will take no damage" )
+    sm.game.bindChatCommand( "/ammo", { { "int", "quantity", true } }, "cl_onChatCommand", "Give ammo (default 100)" )
+    sm.game.bindChatCommand( "/spudgun", {}, "cl_onChatCommand", "Give the spudgun" )
+    sm.game.bindChatCommand( "/gatling", {}, "cl_onChatCommand", "Give the potato gatling gun" )
+    sm.game.bindChatCommand( "/shotgun", {}, "cl_onChatCommand", "Give the fries shotgun" )
+    sm.game.bindChatCommand( "/sunshake", {}, "cl_onChatCommand", "Give 1 sunshake" )
+    sm.game.bindChatCommand( "/baguette", {}, "cl_onChatCommand", "Give 1 revival baguette" )
+    sm.game.bindChatCommand( "/keycard", {}, "cl_onChatCommand", "Give 1 keycard" )
+    sm.game.bindChatCommand( "/powercore", {}, "cl_onChatCommand", "Give 1 powercore" )
+    sm.game.bindChatCommand( "/components", { { "int", "quantity", true } }, "cl_onChatCommand", "Give <quantity> components (default 10)" )
+    sm.game.bindChatCommand( "/glowsticks", { { "int", "quantity", true } }, "cl_onChatCommand", "Give <quantity> glowsticks (default 20)" )
+    sm.game.bindChatCommand( "/foodplease", {}, "cl_onChatCommand", "Give 5 of each edible type" )
+    sm.game.bindChatCommand( "/seedsplease", {}, "cl_onChatCommand", "Give 20 of each seed type and some soil" )
+    sm.game.bindChatCommand( "/tumble", { { "bool", "enable", true } }, "cl_onChatCommand", "Set tumble state" )
+    sm.game.bindChatCommand( "/die", {}, "cl_onChatCommand", "Kill the player" )
+    sm.game.bindChatCommand( "/unstuck", {}, "cl_onChatCommand", "Unstuck the player" )
+    sm.game.bindChatCommand( "/sethp", { { "number", "hp", false } }, "cl_onChatCommand", "Set player hp value" )
+    sm.game.bindChatCommand( "/setbreath", { { "number", "breath", false } }, "cl_onChatCommand", "Set player breath value" )
+    sm.game.bindChatCommand( "/aggroall", {}, "cl_onChatCommand", "All hostile units will be made aware of player" )
+    sm.game.bindChatCommand( "/stopraid", {}, "cl_onChatCommand", "Cancel all incoming raids" )
+    sm.game.bindChatCommand( "/disableraids", { { "bool", "enabled", false } }, "cl_onChatCommand", "Disable raids if true" )
+    sm.game.bindChatCommand( "/noaggro", { { "bool", "enable", true } }, "cl_onChatCommand", "Toggles the player as a target" )
+
+    local autocomplete = {}
+    if g_unitSpawnNames then
+        for k, _ in pairs( g_unitSpawnNames ) do
+            autocomplete[#autocomplete+1] = k
+        end
+    end
+    sm.game.bindChatCommand( "/spawn", { { "string", "unitName", true, autocomplete }, { "int", "amount", true } }, "cl_onChatCommand", "Spawn a unit: 'woc', 'tapebot', 'totebot', 'haybot'" )
+
     sm.game.bindChatCommand( "/ainpc", { { "string", "mode", true } }, "cl_onChatCommand", "Toggle NPC mode on or off" )
     sm.game.bindChatCommand( "/npcspawn", {}, "cl_onChatCommand", "Spawn a test NPC above the player" )
     sm.game.bindChatCommand( "/npcdespawn", {}, "cl_onChatCommand", "Remove the spawned test NPC" )
