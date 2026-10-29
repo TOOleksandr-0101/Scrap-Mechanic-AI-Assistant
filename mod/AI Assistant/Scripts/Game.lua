@@ -131,6 +131,45 @@ local TimeOfDayAliases = {
     ["закат"] = 0.77
 }
 
+local KnownUnits = {
+    ["c8bfb8f3-7efc-49ac-875a-eb85ac0614db"] = { name = "Haybot", threat = "medium", type = "hostile" },
+    ["9f4fde94-312f-4417-b13b-84029c5d6b52"] = { name = "Farmbot", threat = "critical", type = "hostile" },
+    ["8984bdbf-521e-4eed-b3c4-2b5e287eb879"] = { name = "Green Totebot", threat = "low", type = "hostile" },
+    ["9360d346-3ff2-4925-a068-660cf5dd5267"] = { name = "Red Totebot", threat = "medium", type = "hostile" },
+    ["2dea48a4-6a79-11ed-a1eb-0242ac120002"] = { name = "Yellow Totebot", threat = "medium", type = "hostile" },
+    ["58992f50-ca36-44e1-8c47-4996d89d6a9a"] = { name = "Blue Totebot", threat = "medium", type = "hostile" },
+    ["55fd93fa-09ed-4a26-bfa1-4601694d5127"] = { name = "Leaf Totebot", threat = "low", type = "hostile" },
+    ["04761b4a-a83e-4736-b565-120bc776edb2"] = { name = "Tapebot", threat = "high", type = "hostile" },
+    ["c3d31c47-0c9b-4b07-9bd4-8f022dc4333e"] = { name = "Red Tapebot", threat = "critical", type = "hostile" },
+    ["97efd943-d176-479a-a6f4-46373327ddcd"] = { name = "Yellow Tapebot", threat = "high", type = "hostile" },
+    ["c68914f8-d769-4638-9071-f7dbd1d97351"] = { name = "Green Tapebot", threat = "high", type = "hostile" },
+    ["f3ded3f4-ddf9-441d-83f1-28b8cf2c7581"] = { name = "Green Tapebot", threat = "high", type = "hostile" },
+    ["54a06cf0-c035-41a5-b19e-158496d35586"] = { name = "Green Tapebot", threat = "high", type = "hostile" },
+    ["9dbbd2fb-7726-4e8f-8eb4-0dab228a561d"] = { name = "Taped Tapebot", threat = "high", type = "hostile" },
+    ["fcb2e8ce-ca94-45e4-a54b-b5acc156170b"] = { name = "Taped Tapebot", threat = "high", type = "hostile" },
+    ["68d3b2f3-ed4b-4967-9d22-8ee6f555df63"] = { name = "Taped Tapebot", threat = "high", type = "hostile" },
+    ["b837888a-0480-4a34-bc34-d72261a14385"] = { name = "Cablebot", threat = "medium", type = "hostile" },
+    ["531d0a62-6142-4c65-be24-9af58be4a730"] = { name = "Drillbot", threat = "critical", type = "hostile" },
+    ["2ef81574-9b6a-4f79-8306-7f80fff2050b"] = { name = "Trashbot", threat = "low", type = "hostile" },
+    ["c3434728-2724-4327-aba9-af168231d0b0"] = { name = "Trashbot", threat = "low", type = "hostile" },
+    ["92da8324-3cfe-4529-ac1c-c71facda50a3"] = { name = "Minerbot", threat = "medium", type = "hostile" },
+    ["8828e9d2-650c-11ed-9022-0242ac120002"] = { name = "Lootbot", threat = "none", type = "passive" },
+    ["264a563a-e304-430f-a462-9963c77624e9"] = { name = "Woc", threat = "none", type = "passive" },
+    ["4895b33a-ce8f-43d0-8c59-e406d37d8d6b"] = { name = "Baby Woc", threat = "none", type = "friendly" },
+    ["48c03f69-3ec8-454c-8d1a-fa09083363b1"] = { name = "Glowbug", threat = "none", type = "passive" }
+}
+
+local LandmarkNames = {
+    ["mechanicStation"] = "Mechanic Station",
+    ["crashedShip"] = "Crashed Ship",
+    ["hideout"] = "Hideout (Trader)",
+    ["vegetableStation"] = "Vegetable Packing Station",
+    ["fruitStation"] = "Fruit Packing Station",
+    ["drillbotMountain"] = "Drillbot Mountain",
+    ["labyrinth"] = "Labyrinth",
+    ["garage"] = "Garage"
+}
+
 local function ai_loadJson( path )
     if sm.json.fileExists( path ) then
         return sm.json.open( path )
@@ -369,6 +408,22 @@ local function ai_buildPlayerContext()
     return context
 end
 
+local function ai_inspectFollowerContainer( container, defaultName )
+    if not container or not sm.exists( container ) then
+        return { hasItem = false, count = 0, name = defaultName }
+    end
+    local getItemSuccess, uuid, count = pcall( function() return container:getItem( 0 ) end )
+    if getItemSuccess and uuid and tostring( uuid ) ~= "00000000-0000-0000-0000-000000000000" and count and count > 0 then
+        return {
+            hasItem = true,
+            count = count,
+            name = defaultName,
+            uuid = tostring( uuid )
+        }
+    end
+    return { hasItem = false, count = 0, name = defaultName }
+end
+
 local function ai_buildCompanionContext( playerPos )
     local isActive = BabyWocManager.Cl_IsActive and BabyWocManager.Cl_IsActive() or false
     local followerData = BabyWocManager.Cl_GetFollowerData and BabyWocManager.Cl_GetFollowerData() or nil
@@ -377,24 +432,257 @@ local function ai_buildCompanionContext( playerPos )
         active = isActive,
         name = NpcName,
         present = false,
-        distanceToPlayer = nil
+        distanceToPlayer = nil,
+        backpack = {
+            hasBaguette = false,
+            hasGlowstick = false,
+            baguette = { hasItem = false, count = 0, name = "longsandwich" },
+            glowstick = { hasItem = false, count = 0, name = "glowstick" }
+        }
     }
 
-    if followerData and followerData.character and sm.exists( followerData.character ) then
-        local charPos = followerData.character.worldPosition
-        companion.present = true
-        companion.position = {
-            x = ai_round( charPos.x ),
-            y = ai_round( charPos.y ),
-            z = ai_round( charPos.z )
-        }
-        if playerPos then
-            local dist = ( charPos - playerPos ):length()
-            companion.distanceToPlayer = ai_round( dist )
+    if followerData then
+        if followerData.baguetteContainer then
+            local bagItem = ai_inspectFollowerContainer( followerData.baguetteContainer, "longsandwich" )
+            companion.backpack.baguette = bagItem
+            companion.backpack.hasBaguette = bagItem.hasItem
+        end
+        if followerData.glowstickContainer then
+            local glowItem = ai_inspectFollowerContainer( followerData.glowstickContainer, "glowstick" )
+            companion.backpack.glowstick = glowItem
+            companion.backpack.hasGlowstick = glowItem.hasItem
+        end
+
+        if followerData.character and sm.exists( followerData.character ) then
+            local charPos = followerData.character.worldPosition
+            companion.present = true
+            companion.position = {
+                x = ai_round( charPos.x ),
+                y = ai_round( charPos.y ),
+                z = ai_round( charPos.z )
+            }
+            if playerPos then
+                local dist = ( charPos - playerPos ):length()
+                companion.distanceToPlayer = ai_round( dist )
+            end
         end
     end
 
     return companion
+end
+
+local function ai_getCompassDirection( delta )
+    -- In Scrap Mechanic: +Y is North, -Y is South, +X is East, -X is West
+    local angle = math.deg( math.atan2( delta.x, delta.y ) )
+    if angle < 0 then
+        angle = angle + 360
+    end
+
+    if angle >= 337.5 or angle < 22.5 then
+        return "North"
+    elseif angle >= 22.5 and angle < 67.5 then
+        return "North-East"
+    elseif angle >= 67.5 and angle < 112.5 then
+        return "East"
+    elseif angle >= 112.5 and angle < 157.5 then
+        return "South-East"
+    elseif angle >= 157.5 and angle < 202.5 then
+        return "South"
+    elseif angle >= 202.5 and angle < 247.5 then
+        return "South-West"
+    elseif angle >= 247.5 and angle < 292.5 then
+        return "West"
+    else
+        return "North-West"
+    end
+end
+
+local function ai_getRelativeDirection( playerDir, delta )
+    local fLen = math.sqrt( playerDir.x * playerDir.x + playerDir.y * playerDir.y )
+    local dLen = math.sqrt( delta.x * delta.x + delta.y * delta.y )
+    if fLen < 0.001 or dLen < 0.001 then
+        return "ahead"
+    end
+
+    local fx = playerDir.x / fLen
+    local fy = playerDir.y / fLen
+    local dx = delta.x / dLen
+    local dy = delta.y / dLen
+
+    local dot = fx * dx + fy * dy
+    local crossZ = fx * dy - fy * dx
+    local relDeg = math.deg( math.atan2( crossZ, dot ) )
+
+    local absDeg = math.abs( relDeg )
+    if absDeg < 25 then
+        return "ahead"
+    elseif absDeg >= 155 then
+        return "behind you"
+    elseif relDeg > 0 then
+        if absDeg < 70 then
+            return "ahead-left"
+        elseif absDeg < 115 then
+            return "on your left"
+        else
+            return "behind-left"
+        end
+    else
+        if absDeg < 70 then
+            return "ahead-right"
+        elseif absDeg < 115 then
+            return "on your right"
+        else
+            return "behind-right"
+        end
+    end
+end
+
+local function ai_buildRadarContext( playerPos, playerDir )
+    if not playerPos or not sm.physics or not sm.physics.getSphereContacts then
+        return {
+            threatLevel = "safe",
+            hostileCount = 0,
+            passiveCount = 0,
+            nearestThreat = nil,
+            enemies = {},
+            animals = {},
+            mobs = {}
+        }
+    end
+
+    local success, contacts = pcall( sm.physics.getSphereContacts, playerPos, 60.0 )
+    if not success or not contacts or not contacts.characters then
+        return {
+            threatLevel = "safe",
+            hostileCount = 0,
+            passiveCount = 0,
+            nearestThreat = nil,
+            enemies = {},
+            animals = {},
+            mobs = {}
+        }
+    end
+
+    local mobs = {}
+    local enemies = {}
+    local animals = {}
+    local hostileCount = 0
+    local passiveCount = 0
+    local nearestThreat = nil
+
+    for _, char in ipairs( contacts.characters ) do
+        if sm.exists( char ) and not char:isPlayer() then
+            local charPos = char.worldPosition
+            local delta = charPos - playerPos
+            local dist = delta:length()
+
+            local charUuid = nil
+            local getUuidSuccess, uuidResult = pcall( function() return char:getCharacterType() end )
+            if getUuidSuccess and uuidResult then
+                charUuid = tostring( uuidResult )
+            end
+
+            if dist > 0.5 and dist <= 60.0 then
+                local unitInfo = charUuid and KnownUnits[charUuid] or nil
+                local mobName = unitInfo and unitInfo.name or "Unknown Entity"
+                local mobType = unitInfo and unitInfo.type or "unknown"
+                local threat = unitInfo and unitInfo.threat or "unknown"
+
+                if mobType == "hostile" then
+                    hostileCount = hostileCount + 1
+                elseif mobType == "passive" or mobType == "friendly" then
+                    passiveCount = passiveCount + 1
+                end
+
+                local compass = ai_getCompassDirection( delta )
+                local relative = playerDir and ai_getRelativeDirection( playerDir, delta ) or "unknown"
+
+                local entry = {
+                    name = mobName,
+                    type = mobType,
+                    threat = threat,
+                    distance = ai_round( dist ),
+                    compass = compass,
+                    direction = relative
+                }
+                mobs[#mobs + 1] = entry
+
+                if mobType == "hostile" then
+                    enemies[#enemies + 1] = entry
+                    if not nearestThreat or dist < nearestThreat.distance then
+                        nearestThreat = entry
+                    end
+                elseif mobType == "passive" or mobType == "friendly" then
+                    animals[#animals + 1] = entry
+                end
+            end
+        end
+    end
+
+    table.sort( mobs, function( a, b ) return a.distance < b.distance end )
+    table.sort( enemies, function( a, b ) return a.distance < b.distance end )
+    table.sort( animals, function( a, b ) return a.distance < b.distance end )
+
+    local threatLevel = "safe"
+    if hostileCount > 0 then
+        if nearestThreat and ( nearestThreat.threat == "critical" or nearestThreat.distance < 15 ) then
+            threatLevel = "danger"
+        else
+            threatLevel = "caution"
+        end
+    end
+
+    return {
+        threatLevel = threatLevel,
+        hostileCount = hostileCount,
+        passiveCount = passiveCount,
+        nearestThreat = nearestThreat,
+        enemies = enemies,
+        animals = animals,
+        mobs = mobs
+    }
+end
+
+local function ai_buildLandmarksContext( playerPos )
+    if not playerPos or not LogEntryManager or not LogEntryManager.Cl_GetLocations then
+        return {}
+    end
+
+    local locations = nil
+    local success, res = pcall( LogEntryManager.Cl_GetLocations )
+    if success and res then
+        locations = res
+    end
+
+    if not locations then
+        return {}
+    end
+
+    local landmarkList = {}
+    for locKey, locData in pairs( locations ) do
+        local locPos = locData and ( locData.pos or locData ) or nil
+        if locPos and type( locPos ) == "userdata" and locPos.x then
+            local displayName = LandmarkNames[locKey] or locKey
+            local delta = locPos - playerPos
+            local dist = delta:length()
+            local compass = ai_getCompassDirection( delta )
+
+            landmarkList[#landmarkList + 1] = {
+                id = locKey,
+                name = displayName,
+                distance = math.floor( dist + 0.5 ),
+                compass = compass,
+                position = {
+                    x = ai_round( locPos.x ),
+                    y = ai_round( locPos.y ),
+                    z = ai_round( locPos.z )
+                }
+            }
+        end
+    end
+
+    table.sort( landmarkList, function( a, b ) return a.distance < b.distance end )
+    return landmarkList
 end
 
 function Game.server_onCreate( self )
@@ -520,6 +808,20 @@ function Game.client_onUpdate( self, dt )
         if response.reply and response.reply ~= "" then
             ai_pushHistory( self, "assistant", response.reply )
             sm.gui.chatMessage( "[" .. self.ai.npcName .. "] " .. response.reply )
+
+            local followerData = BabyWocManager.Cl_GetFollowerData and BabyWocManager.Cl_GetFollowerData() or nil
+            local soundPos = nil
+            if followerData and followerData.character and sm.exists( followerData.character ) then
+                soundPos = followerData.character.worldPosition
+            elseif sm.localPlayer and sm.localPlayer.getPlayer and sm.localPlayer.getPlayer() then
+                local lp = sm.localPlayer.getPlayer()
+                if lp and lp.character and sm.exists( lp.character ) then
+                    soundPos = lp.character.worldPosition
+                end
+            end
+            if soundPos then
+                pcall( sm.effect.playEffect, "Babywoc - Moo", soundPos )
+            end
         elseif response.error and response.error ~= "" then
             sm.gui.chatMessage( "[AI bridge error] " .. response.error )
         end
@@ -597,15 +899,19 @@ function Game.cl_onChatCommand( self, params )
 
         local playerContext = ai_buildPlayerContext()
         local rawPlayerPos = nil
+        local rawPlayerDir = nil
         if sm.localPlayer and sm.localPlayer.getPlayer and sm.localPlayer.getPlayer() then
             local localPlayer = sm.localPlayer.getPlayer()
             if localPlayer and localPlayer.character and sm.exists( localPlayer.character ) then
                 rawPlayerPos = localPlayer.character.worldPosition
+                rawPlayerDir = localPlayer.character.direction
             end
         end
 
         local companionContext = ai_buildCompanionContext( rawPlayerPos )
         local worldContext = ai_buildWorldContext( self )
+        local radarContext = ai_buildRadarContext( rawPlayerPos, rawPlayerDir )
+        local landmarksContext = ai_buildLandmarksContext( rawPlayerPos )
 
         local request = {
             id = self.ai.nextRequestId,
@@ -620,6 +926,8 @@ function Game.cl_onChatCommand( self, params )
                 world = worldContext,
                 player = playerContext,
                 companion = companionContext,
+                radar = radarContext,
+                landmarks = landmarksContext,
                 questState = ai_buildQuestContext(),
                 lastActionResults = self.ai.lastActionResults
             }
@@ -849,6 +1157,40 @@ function Game.sv_executeAiActions( self, params, player )
                         message = "Quest '" .. tostring( questSpec ) .. "' not recognized."
                     end
                 end
+            elseif name == "emote" then
+                local emoteType = string.lower( tostring( args.type or args.name or args.emote or "moo" ) )
+                local effectName = "Babywoc - Moo"
+                if emoteType == "panic" or emoteType == "scared" or emoteType == "fear" then
+                    effectName = "Babywoc - Panic"
+                elseif emoteType == "eat" or emoteType == "munch" or emoteType == "feed" then
+                    effectName = "Babywoc - Eat"
+                elseif emoteType == "sniff" or emoteType == "investigate" then
+                    effectName = "Babywoc - Sniff"
+                elseif emoteType == "whistle" then
+                    effectName = "Babywoc - Whistle"
+                elseif emoteType == "moo" or emoteType == "happy" or emoteType == "cheer" then
+                    effectName = "Babywoc - Moo"
+                end
+
+                local targetPos = nil
+                local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
+                if followerData and followerData.character and sm.exists( followerData.character ) then
+                    targetPos = followerData.character.worldPosition
+                elseif player.character and sm.exists( player.character ) then
+                    targetPos = player.character.worldPosition
+                end
+
+                if targetPos then
+                    self.network:sendToClients( "cl_n_playAiEffect", {
+                        effect = effectName,
+                        position = { x = targetPos.x, y = targetPos.y, z = targetPos.z }
+                    } )
+                    status = "success"
+                    message = "Companion expressed emote: " .. emoteType .. "."
+                else
+                    status = "failure"
+                    message = "Could not locate companion or player position for emote."
+                end
             else
                 status = "unsupported"
                 message = "Action '" .. name .. "' is not supported by game server."
@@ -863,6 +1205,13 @@ function Game.sv_executeAiActions( self, params, player )
     end
 
     self.network:sendToClient( player, "cl_n_aiActionResults", { responseId = params.responseId, results = results } )
+end
+
+function Game.cl_n_playAiEffect( self, params )
+    if params and params.effect and params.position then
+        local pos = sm.vec3.new( params.position.x, params.position.y, params.position.z )
+        pcall( sm.effect.playEffect, params.effect, pos )
+    end
 end
 
 function Game.cl_n_aiActionResults( self, params )

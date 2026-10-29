@@ -56,7 +56,8 @@ const AI_ACTIONS = [
   "set_time_progress",
   "activate_quest",
   "complete_quest",
-  "abandon_quest"
+  "abandon_quest",
+  "emote"
 ];
 
 let lastHandledId = 0;
@@ -230,6 +231,10 @@ async function askOpenRouter(request) {
     "When liveContext is available, use its exact values for world.day, world.timeString, world.phase, player, and companion status.",
     "If the player asks 'какой сейчас день', 'сколько времени', 'какая фаза' or similar, ALWAYS answer directly using liveContext.world.day, liveContext.world.timeString, and liveContext.world.phase.",
     "Survival state awareness: liveContext.player contains real-time survival stats (hp, maxHp, breath, maxBreath, isConscious) and character states (isDowned, isSwimming, isDiving, isSeated, isTumbling, activeItem). If player's HP or breath is critically low, or player is downed/unconscious, react with urgency and companion concern. If the player asks about their health, breath, or condition, answer using these exact numbers.",
+    "Radar awareness: liveContext.radar contains a real-time scan of nearby entities within 60 meters (threatLevel: 'safe', 'caution', 'danger'; enemies list with type, distance in meters, and direction; animals list with friendly creatures). If the player asks who is nearby or if it's safe, describe the radar findings. If threatLevel is 'danger', warn the player urgently and feel free to trigger the 'emote' action with args.type: 'panic'.",
+    "GPS Landmark navigation: liveContext.landmarks contains known discovered world locations (Mechanic Station, Crashed Ship, Hideout/Trader, Packing Stations) with exact distance and compass direction from the player. If the player asks for directions or where a landmark is, guide them with the exact heading and distance.",
+    "Companion backpack: liveContext.companion.backpack shows if you are carrying food (hasBaguette) or light (hasGlowstick). Answer accurately if the player asks what you have or what is in your backpack.",
+    "Emotes: You can play in-game sounds via {\"name\":\"emote\",\"args\":{\"type\":\"moo\"}} (happy sound), {\"name\":\"emote\",\"args\":{\"type\":\"panic\"}} (scared sound), or {\"name\":\"emote\",\"args\":{\"type\":\"eat\"}} (chewing sound).",
     "If information is missing from liveContext, honestly say you do not have that data yet instead of inventing facts.",
     "If you want the game to do something, request it only through allowed actions.",
     "Never say an in-game action has already succeeded unless it is purely informational and requires no action.",
