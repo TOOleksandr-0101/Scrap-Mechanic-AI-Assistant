@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 
 function resolveBridgeCacheDir() {
   if (process.env.SM_MOD_CACHE_DIR && fs.existsSync(process.env.SM_MOD_CACHE_DIR)) {
@@ -393,6 +394,20 @@ console.log(`[bridge] Key path:      ${KEY_PATH} (exists: ${fs.existsSync(KEY_PA
 console.log(`[bridge] Knowledge:     ${KNOWLEDGE_PATH} (exists: ${fs.existsSync(KNOWLEDGE_PATH)})`);
 console.log("--------------------------------------------------");
 console.log("[bridge] Listening for in-game /aiask requests...");
+
+const KEY_LISTENER_PATH = path.join(__dirname, "key_listener.py");
+if (fs.existsSync(KEY_LISTENER_PATH)) {
+  try {
+    const pyListener = spawn("python", [KEY_LISTENER_PATH, BRIDGE_ROOT], {
+      stdio: "inherit"
+    });
+    pyListener.on("error", (err) => {
+      console.warn("[bridge] Key listener error:", err.message);
+    });
+  } catch (err) {
+    console.warn("[bridge] Could not launch key listener:", err.message);
+  }
+}
 
 sendHeartbeat();
 setInterval(sendHeartbeat, 2500);

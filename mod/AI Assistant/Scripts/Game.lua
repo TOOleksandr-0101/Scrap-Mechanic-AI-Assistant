@@ -8,6 +8,7 @@ local RequestPath = "$CONTENT_DATA/Cache/ai_bridge_request.json"
 local ResponsePath = "$CONTENT_DATA/Cache/ai_bridge_response.json"
 local SettingsPath = "$CONTENT_DATA/Cache/ai_settings.json"
 local HeartbeatPath = "$CONTENT_DATA/Cache/ai_bridge_heartbeat.json"
+local KeyRPath = "$CONTENT_DATA/Cache/ai_key_r.json"
 local SettingsGuiPath = "$CONTENT_DATA/Gui/JsonGuis/AISettings.gui"
 
 local SupportedModels = {
@@ -1118,6 +1119,11 @@ function Game.client_onCreate( self )
         self.ai.lastSeenResponseId = existingResponse.id
         self.ai.nextRequestId = math.max( self.ai.nextRequestId, existingResponse.id + 1 )
     end
+
+    self.cl = self.cl or {}
+    local initialKeyR = ai_loadJson( KeyRPath )
+    self.cl.lastKeyRTime = ( initialKeyR and initialKeyR.time ) and initialKeyR.time or 0
+    self.cl.keyCheckTimer = 0
 end
 
 function Game.client_onClientDataUpdate( self, clientData, channel )
@@ -1217,6 +1223,7 @@ end
 
 function Game.client_onUpdate( self, dt )
     SurvivalGame.client_onUpdate( self, dt )
+    self:cl_updateSeatAim( dt )
 
     if not self.ai then
         return
@@ -1374,6 +1381,112 @@ function Game.cl_onChatCommand( self, params )
     end
 
     SurvivalGame.cl_onChatCommand( self, params )
+end
+
+function Game.cl_updateSeatAim( self, dt )
+    local localPlayer = sm.localPlayer.getPlayer and sm.localPlayer.getPlayer()
+    local character = localPlayer and localPlayer:getCharacter()
+    if not character or not sm.exists( character ) or character:isDowned() or character:isSeated() then
+        return
+    end
+
+    local success, result = sm.localPlayer.getRaycast( 7.5 )
+    if success and result then
+        local shape = result:getShape()
+        if shape and sm.exists( shape ) then
+            local it = shape.interactable
+            if it and sm.exists( it ) and it:hasSeat() then
+                local occChar = it:getSeatCharacter()
+                local prompt = ( occChar ~= nil ) and "Unseat companion" or "Put companion in seat"
+                sm.gui.setInteractionText( "", "R", prompt )
+
+                self.cl = self.cl or {}
+                self.cl.keyCheckTimer = ( self.cl.keyCheckTimer or 0 ) + dt
+                if self.cl.keyCheckTimer >= 0.04 then
+                    self.cl.keyCheckTimer = 0
+                    local keyData = ai_loadJson( KeyRPath )
+                    if keyData and keyData.time and keyData.time ~= self.cl.lastKeyRTime then
+                        self.cl.lastKeyRTime = keyData.time
+                        self.network:sendToServer( "sv_interactSeatCompanion", { shape = shape } )
+                    end
+                end
+            end
+        end
+    end
+end
+
+function Game.cl_e_interactSeatCompanion( self, params )
+    if params and params.shape then
+        self.network:sendToServer( "sv_interactSeatCompanion", params )
+    end
+end
+
+function Game.sv_interactSeatCompanion( self, params, player )
+    if not player or not sm.exists( player ) then
+        return
+    end
+
+    local shape = params and params.shape
+    local seat = ( shape and sm.exists( shape ) and shape.interactable and sm.exists( shape.interactable ) and shape.interactable:hasSeat() ) and shape.interactable or nil
+    if not seat then
+        return
+    end
+
+    local cowChar, p = ai_getCompanionCharacter( player )
+    if not cowChar or not sm.exists( cowChar ) then
+        BabyWocManager.Sv_CallFollower( player )
+        self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " summoned to your side." } )
+        return
+    end
+
+    local currentSeatChar = seat:getSeatCharacter()
+    local isCowInThisSeat = ( currentSeatChar == cowChar or cowChar:getLockingInteractable() == seat or self.sv.cowSeatedSeat == seat )
+
+    if isCowInThisSeat then
+        pcall( function() seat:setSeatCharacter( nil ) end )
+        pcall( function() cowChar:setLockingInteractable( nil ) end )
+        self.sv.cowSeatedSeat = nil
+
+        local playerChar = ( player.character and sm.exists( player.character ) ) and player.character or nil
+        local dropPos = playerChar and ( playerChar.worldPosition + playerChar.direction * 1.5 ) or ( seat.shape.worldPosition + sm.vec3.new( 0, 0, 1 ) )
+        pcall( function()
+            cowChar.worldPosition = dropPos
+            cowChar:setImmovable( false )
+        end )
+        pcall( sm.effect.playEffect, "Babywoc - Moo", dropPos )
+        self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped out of the seat." } )
+    else
+        if currentSeatChar ~= nil and currentSeatChar ~= cowChar then
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = "This seat is already occupied!" } )
+            return
+        end
+
+        if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
+            pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
+        end
+
+        local seatOk = false
+        pcall( function()
+            seat:setSeatCharacter( cowChar )
+            if seat:getSeatCharacter() == cowChar or cowChar:isSeated() then
+                seatOk = true
+            end
+        end )
+
+        if not seatOk then
+            pcall( function()
+                cowChar:setLockingInteractable( seat )
+                seatOk = true
+            end )
+        end
+
+        cowChar.worldPosition = seat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
+        cowChar.velocity = seat.shape.body.velocity
+        self.sv.cowSeatedSeat = seat
+
+        pcall( sm.effect.playEffect, "Babywoc - Moo", seat.shape.worldPosition )
+        self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped into the seat!" } )
+    end
 end
 
 function Game.sv_requestAiCowMode( self, params, player )
