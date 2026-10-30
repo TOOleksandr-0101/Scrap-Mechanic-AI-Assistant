@@ -740,7 +740,7 @@ function Game.server_onCreate( self )
             logs[#logs + 1] = LOGS.log_babywoc
             sm.storage.save( STORAGE_CHANNEL_LOGS, logs )
         end
-        if g_logEntryManager and sm.exists( g_logEntryManager ) then
+        if g_logEntryManager ~= nil then
             LogEntryManager.Sv_AddLog( LOGS.log_babywoc, true )
         end
     end )
@@ -773,7 +773,7 @@ function Game.sv_ensureCompanionActive( self, timeStep )
     end
 
     -- Ensure log_babywoc is marked unlocked in LogEntryManager
-    if g_logEntryManager and sm.exists( g_logEntryManager ) then
+    if g_logEntryManager ~= nil then
         pcall( function() LogEntryManager.Sv_AddLog( LOGS.log_babywoc, true ) end )
     end
 
@@ -958,138 +958,52 @@ function Game.sv_requestAiAttack( self, params, player )
 end
 
 function Game.sv_updateCompanionVehicle( self, timeStep )
-    self.sv = self.sv or {}
-    self.sv.vehicleCheckTimer = ( self.sv.vehicleCheckTimer or 0 ) + timeStep
-    if self.sv.vehicleCheckTimer < 0.25 then
+    if not self.sv or not self.sv.cowSeatedShape then
         return
     end
-    self.sv.vehicleCheckTimer = 0
+
+    local seatShape = self.sv.cowSeatedShape
+    if not sm.exists( seatShape ) then
+        self.sv.cowSeatedShape = nil
+        self.network:sendToClients( "cl_n_syncCowSeat", { shapeId = 0 } )
+        local cowChar, player = ai_getCompanionCharacter( nil )
+        if cowChar and sm.exists( cowChar ) then
+            local u = cowChar:getUnit()
+            if u and sm.exists( u ) then
+                pcall( sm.event.sendToUnit, u, "sv_e_setSeated", { isSeated = false } )
+            end
+            pcall( sm.event.sendToCharacter, cowChar, "sv_e_setSeated", { isSeated = false } )
+            pcall( function() cowChar:setImmovable( false ) end )
+        end
+        return
+    end
 
     local cowChar, player = ai_getCompanionCharacter( nil )
-    if not cowChar or not player then
+    if not cowChar or not sm.exists( cowChar ) then
+        self.sv.cowSeatedShape = nil
+        self.network:sendToClients( "cl_n_syncCowSeat", { shapeId = 0 } )
         return
     end
 
-    local playerChar = ( player.character and sm.exists( player.character ) ) and player.character or nil
-    if not playerChar or playerChar:isDowned() then
-        if self.sv.cowSeatedSeat or cowChar:isSeated() or cowChar:getLockingInteractable() ~= nil then
-            if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
-                pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
-            end
-            self.sv.cowSeatedSeat = nil
-            local lockingIt = cowChar:getLockingInteractable()
-            if lockingIt and sm.exists( lockingIt ) then
-                pcall( function()
-                    if lockingIt:hasSeat() then lockingIt:setSeatCharacter( nil ) end
-                    cowChar:setLockingInteractable( nil )
-                end )
-            end
-        end
-        return
+    -- Keep cow position, up vector, and facing direction aligned to the seat every fixed tick
+    local sitPos = seatShape.worldPosition + seatShape.up * 0.22 + seatShape.at * 0.05
+    pcall( function()
+        cowChar:setWorldPosition( sitPos )
+        cowChar:setUpDirection( seatShape.up )
+    end )
+
+    local unit = cowChar:getUnit()
+    if unit and sm.exists( unit ) then
+        pcall( function()
+            unit:setFacingDirection( seatShape.at )
+            unit:setMovementDirection( sm.vec3.zero() )
+        end )
     end
+end
 
-    local isPlayerSeated = playerChar:isSeated()
-
-    if isPlayerSeated then
-        local driverSeat = playerChar:getLockingInteractable()
-        if not driverSeat or not sm.exists( driverSeat ) or not driverSeat:hasSeat() then
-            return
-        end
-
-        local driverBody = driverSeat:getBody()
-        if not driverBody or not sm.exists( driverBody ) then
-            return
-        end
-
-        -- If cow is already in our recorded passenger seat, make sure it's still valid
-        if self.sv.cowSeatedSeat then
-            if sm.exists( self.sv.cowSeatedSeat ) and ( self.sv.cowSeatedSeat:getSeatCharacter() == cowChar or cowChar:getLockingInteractable() == self.sv.cowSeatedSeat ) then
-                -- Keep cow character locked to seat position and velocity with the vehicle
-                pcall( function()
-                    cowChar.worldPosition = self.sv.cowSeatedSeat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
-                    cowChar.velocity = driverBody.velocity
-                end )
-                return
-            else
-                self.sv.cowSeatedSeat = nil
-            end
-        end
-
-        -- Scan ONLY the exact same creation (all bodies connected to the driver's vehicle)
-        if not cowChar:isSeated() and cowChar:getLockingInteractable() == nil then
-            local creationBodies = driverBody:getCreationBodies()
-            local bestSeat = nil
-            local bestDist = 999999
-            local driverPos = driverSeat.shape.worldPosition
-
-            for _, body in ipairs( creationBodies ) do
-                if sm.exists( body ) then
-                    for _, shape in ipairs( body:getShapes() ) do
-                        if sm.exists( shape ) then
-                            local it = shape.interactable
-                            if it and sm.exists( it ) and it:hasSeat() and it ~= driverSeat then
-                                local occChar = it:getSeatCharacter()
-                                if occChar == nil or occChar == cowChar then
-                                    local dist = ( shape.worldPosition - driverPos ):length()
-                                    if dist < bestDist then
-                                        bestDist = dist
-                                        bestSeat = it
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if bestSeat then
-                local seatedOk = false
-                pcall( function()
-                    bestSeat:setSeatCharacter( cowChar )
-                    if bestSeat:getSeatCharacter() == cowChar or cowChar:isSeated() then
-                        seatedOk = true
-                    end
-                end )
-
-                if not seatedOk then
-                    pcall( function()
-                        cowChar:setLockingInteractable( bestSeat )
-                        cowChar.worldPosition = bestSeat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
-                        seatedOk = true
-                    end )
-                end
-
-                if seatedOk then
-                    self.sv.cowSeatedSeat = bestSeat
-                    pcall( sm.effect.playEffect, "Babywoc - Moo", bestSeat.shape.worldPosition )
-                    self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped into the passenger seat!" } )
-                end
-            end
-        end
-    else
-        -- Player is on foot! If companion was seated in passenger seat, unseat and place next to player
-        if self.sv.cowSeatedSeat or cowChar:isSeated() or cowChar:getLockingInteractable() ~= nil then
-            if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
-                pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
-            end
-            self.sv.cowSeatedSeat = nil
-
-            local lockingIt = cowChar:getLockingInteractable()
-            if lockingIt and sm.exists( lockingIt ) then
-                pcall( function()
-                    if lockingIt:hasSeat() then
-                        lockingIt:setSeatCharacter( nil )
-                    end
-                    cowChar:setLockingInteractable( nil )
-                end )
-            end
-
-            local dropPos = playerChar.worldPosition + playerChar.direction * 1.5
-            pcall( function() cowChar.worldPosition = dropPos end )
-            pcall( sm.effect.playEffect, "Babywoc - Moo", dropPos )
-            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped out of the vehicle." } )
-        end
-    end
+function Game.cl_n_syncCowSeat( self, params )
+    self.cl = self.cl or {}
+    self.cl.cowSeatedShapeId = params and params.shapeId or 0
 end
 
 function Game.client_onCreate( self )
@@ -1396,11 +1310,16 @@ function Game.cl_updateSeatAim( self, dt )
         if shape and sm.exists( shape ) then
             local it = shape.interactable
             if it and sm.exists( it ) and it:hasSeat() then
-                local occChar = it:getSeatCharacter()
-                local prompt = ( occChar ~= nil ) and "Unseat companion" or "Put companion in seat"
+                self.cl = self.cl or {}
+                local cowChar, p = ai_getCompanionCharacter( localPlayer )
+                local isSeatedHere = ( self.cl.cowSeatedShapeId and self.cl.cowSeatedShapeId == shape:getId() )
+                if not isSeatedHere and cowChar and sm.exists( cowChar ) then
+                    isSeatedHere = ( ( cowChar.worldPosition - shape.worldPosition ):length() < 0.85 )
+                end
+
+                local prompt = isSeatedHere and "Unseat companion" or "Put companion in seat"
                 sm.gui.setInteractionText( "", "R", prompt )
 
-                self.cl = self.cl or {}
                 self.cl.keyCheckTimer = ( self.cl.keyCheckTimer or 0 ) + dt
                 if self.cl.keyCheckTimer >= 0.04 then
                     self.cl.keyCheckTimer = 0
@@ -1427,8 +1346,12 @@ function Game.sv_interactSeatCompanion( self, params, player )
     end
 
     local shape = params and params.shape
-    local seat = ( shape and sm.exists( shape ) and shape.interactable and sm.exists( shape.interactable ) and shape.interactable:hasSeat() ) and shape.interactable or nil
-    if not seat then
+    if not shape or not sm.exists( shape ) then
+        return
+    end
+
+    local it = shape.interactable
+    if not it or not sm.exists( it ) or not it:hasSeat() then
         return
     end
 
@@ -1439,52 +1362,58 @@ function Game.sv_interactSeatCompanion( self, params, player )
         return
     end
 
-    local currentSeatChar = seat:getSeatCharacter()
-    local isCowInThisSeat = ( currentSeatChar == cowChar or cowChar:getLockingInteractable() == seat or self.sv.cowSeatedSeat == seat )
+    local cowUnit = cowChar:getUnit()
+    local isCowInThisSeat = ( self.sv.cowSeatedShape == shape )
+    if not isCowInThisSeat then
+        local dist = ( cowChar.worldPosition - shape.worldPosition ):length()
+        if dist < 0.85 then
+            isCowInThisSeat = true
+        end
+    end
 
     if isCowInThisSeat then
-        pcall( function() seat:setSeatCharacter( nil ) end )
-        pcall( function() cowChar:setLockingInteractable( nil ) end )
-        self.sv.cowSeatedSeat = nil
+        -- Unseat
+        self.sv.cowSeatedShape = nil
+        self.network:sendToClients( "cl_n_syncCowSeat", { shapeId = 0 } )
+
+        if cowUnit and sm.exists( cowUnit ) then
+            pcall( sm.event.sendToUnit, cowUnit, "sv_e_setSeated", { isSeated = false } )
+        end
+        pcall( sm.event.sendToCharacter, cowChar, "sv_e_setSeated", { isSeated = false } )
 
         local playerChar = ( player.character and sm.exists( player.character ) ) and player.character or nil
-        local dropPos = playerChar and ( playerChar.worldPosition + playerChar.direction * 1.5 ) or ( seat.shape.worldPosition + sm.vec3.new( 0, 0, 1 ) )
+        local dropPos = playerChar and ( playerChar.worldPosition + playerChar.direction * 1.5 ) or ( shape.worldPosition + sm.vec3.new( 0, 0, 1 ) )
         pcall( function()
-            cowChar.worldPosition = dropPos
+            cowChar:setWorldPosition( dropPos )
             cowChar:setImmovable( false )
         end )
+
         pcall( sm.effect.playEffect, "Babywoc - Moo", dropPos )
         self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped out of the seat." } )
     else
-        if currentSeatChar ~= nil and currentSeatChar ~= cowChar then
-            self.network:sendToClient( player, "cl_n_npcStatus", { message = "This seat is already occupied!" } )
-            return
-        end
+        -- Seat
+        self.sv.cowSeatedShape = shape
+        self.network:sendToClients( "cl_n_syncCowSeat", { shapeId = shape:getId() } )
 
-        if self.sv.cowSeatedSeat and sm.exists( self.sv.cowSeatedSeat ) then
-            pcall( function() self.sv.cowSeatedSeat:setSeatCharacter( nil ) end )
+        if cowUnit and sm.exists( cowUnit ) then
+            pcall( sm.event.sendToUnit, cowUnit, "sv_e_setSeated", { isSeated = true } )
         end
+        pcall( sm.event.sendToCharacter, cowChar, "sv_e_setSeated", { isSeated = true } )
 
-        local seatOk = false
+        local sitPos = shape.worldPosition + shape.up * 0.22 + shape.at * 0.05
         pcall( function()
-            seat:setSeatCharacter( cowChar )
-            if seat:getSeatCharacter() == cowChar or cowChar:isSeated() then
-                seatOk = true
-            end
+            cowChar:setWorldPosition( sitPos )
+            cowChar:setUpDirection( shape.up )
         end )
 
-        if not seatOk then
+        if cowUnit and sm.exists( cowUnit ) then
             pcall( function()
-                cowChar:setLockingInteractable( seat )
-                seatOk = true
+                cowUnit:setFacingDirection( shape.at )
+                cowUnit:setMovementDirection( sm.vec3.zero() )
             end )
         end
 
-        cowChar.worldPosition = seat.shape.worldPosition + sm.vec3.new( 0, 0, 0.25 )
-        cowChar.velocity = seat.shape.body.velocity
-        self.sv.cowSeatedSeat = seat
-
-        pcall( sm.effect.playEffect, "Babywoc - Moo", seat.shape.worldPosition )
+        pcall( sm.effect.playEffect, "Babywoc - Moo", shape.worldPosition )
         self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " hopped into the seat!" } )
     end
 end
