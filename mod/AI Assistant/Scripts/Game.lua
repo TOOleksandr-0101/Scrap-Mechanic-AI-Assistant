@@ -689,6 +689,31 @@ local function ai_buildLandmarksContext( playerPos )
     return landmarkList
 end
 
+-- Hook LogEntryManager to ensure LOGS.log_babywoc is ALWAYS considered unlocked in every world
+if LogEntryManager then
+    local orig_Sv_HasLog = LogEntryManager.Sv_HasLog
+    function LogEntryManager.Sv_HasLog( uuid )
+        if uuid == LOGS.log_babywoc or tostring( uuid ) == tostring( LOGS.log_babywoc ) then
+            return true
+        end
+        if orig_Sv_HasLog then
+            return orig_Sv_HasLog( uuid )
+        end
+        return false
+    end
+
+    local orig_Cl_HasLog = LogEntryManager.Cl_HasLog
+    function LogEntryManager.Cl_HasLog( uuid )
+        if uuid == LOGS.log_babywoc or tostring( uuid ) == tostring( LOGS.log_babywoc ) then
+            return true
+        end
+        if orig_Cl_HasLog then
+            return orig_Cl_HasLog( uuid )
+        end
+        return false
+    end
+end
+
 function Game.server_onCreate( self )
     local originalCreateWorld = sm.world.createWorld
     sm.world.createWorld = function( filename, classname, terrainParams, seed )
@@ -704,13 +729,108 @@ function Game.server_onCreate( self )
     self.sv = self.sv or {}
     self.sv.cowSeatedSeat = nil
     self.sv.vehicleCheckTimer = 0
+    self.sv.companionCheckTimer = 0
+    self.sv.companionStayMode = false
+
+    -- Ensure LOGS.log_babywoc is permanently unlocked in storage channel
+    pcall( function()
+        local logs = sm.storage.load( STORAGE_CHANNEL_LOGS ) or {}
+        if not isAnyOf( LOGS.log_babywoc, logs ) then
+            logs[#logs + 1] = LOGS.log_babywoc
+            sm.storage.save( STORAGE_CHANNEL_LOGS, logs )
+        end
+        if g_logEntryManager and sm.exists( g_logEntryManager ) then
+            LogEntryManager.Sv_AddLog( LOGS.log_babywoc, true )
+        end
+    end )
 
 	print("Game.server_onCreate")
 end
 
 function Game.server_onFixedUpdate( self, timeStep )
     SurvivalGame.server_onFixedUpdate( self, timeStep )
+    self:sv_ensureCompanionActive( timeStep )
     self:sv_updateCompanionVehicle( timeStep )
+end
+
+function Game.sv_ensureCompanionActive( self, timeStep )
+    self.sv = self.sv or {}
+    self.sv.companionCheckTimer = ( self.sv.companionCheckTimer or 0 ) + timeStep
+    if self.sv.companionCheckTimer < 1.5 then
+        return
+    end
+    self.sv.companionCheckTimer = 0
+
+    local players = sm.player.getAllPlayers()
+    if not players or #players == 0 then
+        return
+    end
+
+    local player = players[1]
+    if not player or not sm.exists( player ) or not player.character or not sm.exists( player.character ) then
+        return
+    end
+
+    -- Ensure log_babywoc is marked unlocked in LogEntryManager
+    if g_logEntryManager and sm.exists( g_logEntryManager ) then
+        pcall( function() LogEntryManager.Sv_AddLog( LOGS.log_babywoc, true ) end )
+    end
+
+    local followerData = BabyWocManager.Sv_GetFollowerData and BabyWocManager.Sv_GetFollowerData() or nil
+    local hasValidUnit = followerData and followerData.unit and sm.exists( followerData.unit )
+
+    if hasValidUnit then
+        -- Cow is active! Make sure game scripts haven't marked it immovable unless player ordered stay mode
+        if followerData.unit.character and sm.exists( followerData.unit.character ) then
+            if not self.sv.companionStayMode then
+                if followerData.unit.character:isImmovable() then
+                    pcall( function() followerData.unit.character:setImmovable( false ) end )
+                end
+            end
+        end
+        if followerData.playerToFollow ~= player then
+            followerData.playerToFollow = player
+        end
+    else
+        -- No active unit in BabyWocManager. Check if a baby woc character exists nearby in the world
+        local pPos = player.character.worldPosition
+        local success, contacts = pcall( sm.physics.getSphereContacts, pPos, 45.0 )
+        local existingUnit = nil
+        local existingChar = nil
+        if success and contacts and contacts.characters then
+            for _, ch in ipairs( contacts.characters ) do
+                if sm.exists( ch ) and ch:isNpc() then
+                    local t = tostring( ch:getCharacterType() )
+                    if t == tostring( unit_baby_woc ) or string.find( t:lower(), "baby" ) or string.find( t:lower(), "woc" ) then
+                        existingChar = ch
+                        local u = ch:getUnit()
+                        if u and sm.exists( u ) then
+                            existingUnit = u
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if existingUnit and sm.exists( existingUnit ) then
+            -- Unfreeze and register directly into BabyWocManager!
+            if existingChar and sm.exists( existingChar ) then
+                pcall( function() existingChar:setImmovable( false ) end )
+            end
+            pcall( function() BabyWocManager.Sv_RegisterFollower( existingUnit, player ) end )
+        else
+            -- No cow exists anywhere near the player (e.g. brand new world start).
+            -- Summon a new companion cow!
+            self.sv.companionSpawnCooldown = ( self.sv.companionSpawnCooldown or 0 ) - 1.5
+            if ( self.sv.companionSpawnCooldown or 0 ) <= 0 then
+                self.sv.companionSpawnCooldown = 4.0
+                if not followerData or not followerData.pendingUnitRequestTick then
+                    pcall( function() BabyWocManager.Sv_CallFollower( player ) end )
+                end
+            end
+        end
+    end
 end
 
 local function ai_getCompanionCharacter( player )
@@ -1257,10 +1377,44 @@ function Game.cl_onChatCommand( self, params )
 end
 
 function Game.sv_requestAiCowMode( self, params, player )
+    local mode = params and params.mode or "follow"
+    local cowChar, p = ai_getCompanionCharacter( player )
+    local playerChar = ( player and player.character and sm.exists( player.character ) ) and player.character or nil
+
+    if mode == "come" then
+        self.sv.companionStayMode = false
+        if cowChar and sm.exists( cowChar ) and playerChar then
+            local arrivePos = playerChar.worldPosition + playerChar.direction * 1.5
+            pcall( function()
+                cowChar.worldPosition = arrivePos
+                cowChar:setImmovable( false )
+            end )
+            pcall( sm.effect.playEffect, "Babywoc - Moo", arrivePos )
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " ran over to you!" } )
+        else
+            BabyWocManager.Sv_CallFollower( player )
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " summoned to your side." } )
+        end
+    elseif mode == "stay" then
+        self.sv.companionStayMode = true
+        if cowChar and sm.exists( cowChar ) then
+            pcall( function() cowChar:setImmovable( true ) end )
+            pcall( sm.effect.playEffect, "Babywoc - Moo", cowChar.worldPosition )
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " is staying here." } )
+        end
+    elseif mode == "follow" then
+        self.sv.companionStayMode = false
+        if cowChar and sm.exists( cowChar ) then
+            pcall( function() cowChar:setImmovable( false ) end )
+            pcall( sm.effect.playEffect, "Babywoc - Moo", cowChar.worldPosition )
+            self.network:sendToClient( player, "cl_n_npcStatus", { message = NpcName .. " is following you." } )
+        end
+    end
+
     if player and player.character and sm.exists( player.character ) then
-        sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = params.mode } )
-    else
-        self.network:sendToClient( player, "cl_n_npcStatus", { ok = false, message = "AI cow mode failed: player character missing." } )
+        pcall( function()
+            sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = mode } )
+        end )
     end
 end
 
@@ -1356,32 +1510,17 @@ function Game.sv_executeAiActions( self, params, player )
                     message = "Player character does not exist."
                 end
             elseif name == "set_ai_mode_follow" then
-                if player.character and sm.exists( player.character ) then
-                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "follow" } )
-                    status = "success"
-                    message = "AI cow set to follow mode."
-                else
-                    status = "failure"
-                    message = "Player character does not exist."
-                end
+                self:sv_requestAiCowMode( { mode = "follow" }, player )
+                status = "success"
+                message = NpcName .. " set to follow mode."
             elseif name == "set_ai_mode_stay" then
-                if player.character and sm.exists( player.character ) then
-                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "stay" } )
-                    status = "success"
-                    message = "AI cow set to stay mode."
-                else
-                    status = "failure"
-                    message = "Player character does not exist."
-                end
+                self:sv_requestAiCowMode( { mode = "stay" }, player )
+                status = "success"
+                message = NpcName .. " set to stay mode."
             elseif name == "set_ai_mode_come" then
-                if player.character and sm.exists( player.character ) then
-                    sm.event.sendToWorld( player.character:getWorld(), "sv_e_setAiNpcMode", { player = player, mode = "come" } )
-                    status = "success"
-                    message = "AI cow told to come."
-                else
-                    status = "failure"
-                    message = "Player character does not exist."
-                end
+                self:sv_requestAiCowMode( { mode = "come" }, player )
+                status = "success"
+                message = NpcName .. " called to your side."
             elseif name == "set_time_of_day" then
                 local timeValue = ai_findTimeOfDayValue( args )
                 if timeValue ~= nil then
